@@ -30,4 +30,6 @@ local_scheme = "node-and-date"
 
 [project]
 name = "mission_scanner"
+description = "A scanner for Arma 3 mission files"
+requires-python = ">=3.8"
 dynamic = ["version"]
