@@ -9,7 +9,6 @@ use rayon::prelude::*;
 use pbo_tools::core::api::{PboApi, PboApiOps};
 use pbo_tools::extract::ExtractOptions;
 
-use crate::database::MissionDatabase;
 use crate::types::SkipReason;
 use super::types::{MissionExtractionResult, MissionInfo};
 
@@ -18,7 +17,6 @@ pub fn extract_missions(
     cache_dir: &Path,
     threads: usize,
     mission_files: &[PathBuf],
-    db: Arc<Mutex<MissionDatabase>>,
     progress: ProgressBar,
 ) -> Result<Vec<MissionExtractionResult>> {
     info!("Extracting {} mission files", mission_files.len());
@@ -58,25 +56,10 @@ pub fn extract_missions(
                         continue;
                     }
                 };
-                
-                // Update the database
-                let mut db = db.lock().unwrap();
-                db.update_mission_with_reason(
-                    path,
-                    &hash,
-                    true,
-                    SkipReason::ExtractionFailed,
-                );
             }
         }
     }
-    
-    // Save the database
-    let db_path = cache_dir.join("mission_db.json");
-    if let Err(e) = db.lock().unwrap().save(&db_path) {
-        warn!("Failed to save mission database: {}", e);
-    }
-    
+
     Ok(extraction_results)
 }
 

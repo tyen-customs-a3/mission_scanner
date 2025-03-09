@@ -7,8 +7,6 @@ use tokio::task;
 use futures::future::join_all;
 use walkdir::WalkDir;
 
-use crate::database::MissionDatabase;
-use crate::database::operations::has_mission_changed;
 use crate::extractor::types::MissionExtractionResult;
 use crate::extractor::extractor;
 use crate::types::{SkipReason, MissionScannerConfig};
@@ -19,7 +17,6 @@ pub async fn scan_and_extract_with_config(
     input_dir: &Path,
     cache_dir: &Path,
     threads: usize,
-    db: &Arc<Mutex<MissionDatabase>>,
     config: &MissionScannerConfig
 ) -> Result<Vec<MissionExtractionResult>> {
     info!("Scanning for mission files in {} with configuration", input_dir.display());
@@ -49,12 +46,7 @@ pub async fn scan_and_extract_with_config(
     scan_progress.set_message("Scanning mission files");
     
     // Filter missions that need to be processed based on config
-    let scan_results = scan_mission_files_with_config(&mission_files, scan_progress, db, config)?;
-    
-    if scan_results.is_empty() {
-        info!("No new or changed mission files to process");
-        return collect_cached_results(&mission_files, cache_dir, db);
-    }
+    let scan_results = scan_mission_files_with_config(&mission_files, scan_progress, config)?;
     
     info!("Processing {} missions", scan_results.len());
     
@@ -72,7 +64,6 @@ pub async fn scan_and_extract_with_config(
     // Process missions in parallel
     for scan_result in scan_results {
         let cache_dir = cache_dir.to_path_buf();
-        let db_clone = db.clone();
         let extract_progress_clone = extract_progress.clone();
         let config_clone = config.clone();
         
@@ -110,18 +101,6 @@ pub async fn scan_and_extract_with_config(
     info!("Extracted {} mission files", extraction_results.len());
     extract_progress.finish_with_message(format!("Extracted {} missions", extraction_results.len()));
     
-    // Add previously processed missions from the database
-    if !config.force_rescan {
-        for path in &mission_files {
-            if !extraction_results.iter().any(|er| er.pbo_path == *path) {
-                if let Ok(cached_result) = load_cached_mission(cache_dir, path) {
-                    debug!("Using cached result for {}", path.display());
-                    extraction_results.push(cached_result);
-                }
-            }
-        }
-    }
-    
     Ok(extraction_results)
 }
 
@@ -130,18 +109,16 @@ pub async fn scan_and_extract(
     input_dir: &Path,
     cache_dir: &Path,
     threads: usize,
-    db: &Arc<Mutex<MissionDatabase>>
 ) -> Result<Vec<MissionExtractionResult>> {
     // Use default config
     let config = MissionScannerConfig::default();
-    scan_and_extract_with_config(input_dir, cache_dir, threads, db, &config).await
+    scan_and_extract_with_config(input_dir, cache_dir, threads, &config).await
 }
 
 /// Scan mission files with configuration options
 fn scan_mission_files_with_config(
     mission_files: &[PathBuf],
     progress: ProgressBar,
-    db: &Arc<Mutex<MissionDatabase>>,
     config: &MissionScannerConfig
 ) -> Result<Vec<MissionScanResult>> {
     let mut scan_results = Vec::new();
@@ -149,28 +126,6 @@ fn scan_mission_files_with_config(
     for path in mission_files {
         // Calculate hash of the mission file
         let hash = calculate_file_hash(path)?;
-        
-        // Check if the mission has changed if we're not forcing a rescan
-        if !config.force_rescan && config.skip_unchanged {
-            let has_changed = {
-                let db_guard = db.lock().unwrap();
-                has_mission_changed(&db_guard, path, &hash)?
-            };
-            
-            if !has_changed.0 {
-                debug!("Mission unchanged: {}", path.display());
-                let mut db = db.lock().unwrap();
-                db.update_mission_with_reason(
-                    path,
-                    &hash,
-                    false,
-                    has_changed.1.unwrap_or(SkipReason::Unchanged)
-                );
-                
-                progress.inc(1);
-                continue;
-            }
-        }
         
         // Mission needs to be processed
         let mission_name = path.file_stem()
@@ -191,72 +146,6 @@ fn scan_mission_files_with_config(
     progress.finish_with_message(format!("Scanned {} missions", mission_files.len()));
     
     Ok(scan_results)
-}
-
-/// Collect cached results
-fn collect_cached_results(
-    mission_files: &[PathBuf],
-    cache_dir: &Path,
-    db: &Arc<Mutex<MissionDatabase>>
-) -> Result<Vec<MissionExtractionResult>> {
-    let mut cached_results = Vec::new();
-    
-    for path in mission_files {
-        // Check if the mission is in the database
-        let mission_info = {
-            let db = db.lock().unwrap();
-            db.get_mission_info(path).cloned()
-        };
-        
-        if let Some(info) = mission_info {
-            if info.processed {
-                // Try to load the cached result
-                match load_cached_mission(cache_dir, path) {
-                    Ok(result) => {
-                        cached_results.push(result);
-                    },
-                    Err(e) => {
-                        warn!("Failed to load cached mission {}: {}", path.display(), e);
-                    }
-                }
-            }
-        }
-    }
-    
-    Ok(cached_results)
-}
-
-/// Load a cached mission
-fn load_cached_mission(cache_dir: &Path, mission_path: &Path) -> Result<MissionExtractionResult> {
-    let mission_name = mission_path.file_stem()
-        .ok_or_else(|| anyhow!("Invalid mission path"))?
-        .to_string_lossy()
-        .to_string();
-        
-    let extracted_path = cache_dir.join(&mission_name);
-    
-    if !extracted_path.exists() {
-        return Err(anyhow!("Cached mission directory does not exist"));
-    }
-    
-    // Find mission.sqm file
-    let sqm_file = find_file_by_extension(&extracted_path, "sqm");
-    
-    // Find SQF files
-    let sqf_files = find_files_by_extension(&extracted_path, "sqf");
-    
-    // Find CPP/HPP files
-    let mut cpp_files = find_files_by_extension(&extracted_path, "cpp");
-    cpp_files.extend(find_files_by_extension(&extracted_path, "hpp"));
-    
-    Ok(MissionExtractionResult {
-        mission_name,
-        pbo_path: mission_path.to_path_buf(),
-        extracted_path,
-        sqm_file,
-        sqf_files,
-        cpp_files,
-    })
 }
 
 /// Calculate hash of a file

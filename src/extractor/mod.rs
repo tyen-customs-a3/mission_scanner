@@ -9,7 +9,6 @@ use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 use rayon::prelude::*;
 
 use crate::types::SkipReason;
-use crate::database::MissionDatabase;
 
 pub use types::MissionExtractionResult;
 pub use extractor::extract_single_mission;
@@ -20,25 +19,15 @@ pub struct MissionExtractor<'a> {
     cache_dir: &'a Path,
     /// Number of parallel threads to use
     threads: usize,
-    /// Database for storing extraction results
-    db: Arc<Mutex<MissionDatabase>>,
 }
 
 impl<'a> MissionExtractor<'a> {
     /// Create a new mission extractor
     pub fn new(cache_dir: &'a Path, threads: usize) -> Result<Self> {
-        let db_path = cache_dir.join("mission_db.json");
-        let db = Arc::new(Mutex::new(
-            MissionDatabase::load_or_create(&db_path).unwrap_or_else(|_| {
-                warn!("Failed to load mission database, creating a new one");
-                MissionDatabase::new()
-            })
-        ));
         
         Ok(Self {
             cache_dir,
             threads,
-            db,
         })
     }
     
@@ -52,13 +41,7 @@ impl<'a> MissionExtractor<'a> {
             self.cache_dir,
             self.threads,
             mission_files,
-            self.db.clone(),
             progress,
         )
-    }
-    
-    /// Get the mission database
-    pub fn get_database(&self) -> Arc<Mutex<MissionDatabase>> {
-        self.db.clone()
     }
 } 

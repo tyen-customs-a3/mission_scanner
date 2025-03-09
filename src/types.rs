@@ -64,8 +64,6 @@ pub struct MissionScannerConfig {
     pub max_threads: usize,
     /// Whether to force rescanning of unchanged missions
     pub force_rescan: bool,
-    /// Whether to skip validation of mission classes
-    pub skip_validation: bool,
     /// Skip extraction if PBO hash hasn't changed (uses database)
     pub skip_unchanged: bool,
     /// Extract only specific file extensions (empty = all)
@@ -79,7 +77,6 @@ impl Default for MissionScannerConfig {
         Self {
             max_threads: num_cpus::get(),
             force_rescan: false,
-            skip_validation: false,
             skip_unchanged: true,
             file_extensions: vec!["sqm".to_string(), "sqf".to_string(), "cpp".to_string(), "hpp".to_string()],
             recursive: true,

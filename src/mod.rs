@@ -17,10 +17,7 @@ pub use extractor::{
     types::MissionExtractionResult,
 };
 pub use scanner::MissionScanner;
-pub use validator::{
-    ClassExistenceValidator,
-    types::{ClassExistenceReport, MissionClassExistenceReport, MissingClassInfo},
-};
+pub use validator::types::{ClassExistenceReport, MissionClassExistenceReport, MissingClassInfo};
 pub use database::{
     MissionDatabase,
     MissionDatabaseStats,
@@ -93,28 +90,4 @@ pub async fn scan_missions(config: MissionScanConfig<'_>) -> Result<Vec<MissionD
     info!("Analyzed dependencies for {} missions", mission_results.len());
     
     Ok(mission_results)
-}
-
-/// Validate classes against mission dependencies
-pub fn validate_mission_classes(
-    mission_results: &[MissionDependencyResult],
-    processed_classes: &[crate::code_scanner::class::types::ProcessedClass]
-) -> Result<ClassExistenceReport> {
-    info!("Validating classes against mission dependencies");
-    
-    // Create a class validator
-    let mut class_validator = validator::ClassExistenceValidator::new();
-    
-    // Load class database from memory
-    class_validator.load_class_database_from_memory(processed_classes)?;
-    
-    // Validate mission classes
-    let class_existence_report = class_validator.validate_mission_classes(mission_results)?;
-    
-    info!("Validated {} missions with {} unique classes", 
-        class_existence_report.total_missions,
-        class_existence_report.total_unique_classes
-    );
-    
-    Ok(class_existence_report)
 } 

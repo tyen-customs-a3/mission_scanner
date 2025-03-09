@@ -8,7 +8,6 @@ use anyhow::Result;
 use log::{info, warn, error};
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 
-use crate::database::MissionDatabase;
 use crate::extractor::types::MissionExtractionResult;
 use crate::types::MissionScannerConfig;
 
@@ -29,7 +28,6 @@ pub struct MissionScanner<'a> {
     /// Number of parallel threads to use
     threads: usize,
     /// Database for storing scan results
-    db: Arc<Mutex<MissionDatabase>>,
     /// Configuration options
     config: MissionScannerConfig,
 }
@@ -41,24 +39,11 @@ impl<'a> MissionScanner<'a> {
         cache_dir: &'a Path,
         threads: usize,
     ) -> Self {
-        // Load or create the database
-        let db_path = cache_dir.join("mission_database.json");
-        let db = match MissionDatabase::load_or_create(&db_path) {
-            Ok(db) => {
-                info!("Loaded mission database from {}", db_path.display());
-                db
-            },
-            Err(e) => {
-                warn!("Failed to load mission database, creating new one: {}", e);
-                MissionDatabase::new()
-            }
-        };
         
         Self {
             input_dir,
             cache_dir,
             threads,
-            db: Arc::new(Mutex::new(db)),
             config: MissionScannerConfig::default(),
         }
     }
@@ -69,24 +54,11 @@ impl<'a> MissionScanner<'a> {
         cache_dir: &'a Path,
         config: MissionScannerConfig,
     ) -> Self {
-        // Load or create the database
-        let db_path = cache_dir.join("mission_database.json");
-        let db = match MissionDatabase::load_or_create(&db_path) {
-            Ok(db) => {
-                info!("Loaded mission database from {}", db_path.display());
-                db
-            },
-            Err(e) => {
-                warn!("Failed to load mission database, creating new one: {}", e);
-                MissionDatabase::new()
-            }
-        };
         
         Self {
             input_dir,
             cache_dir,
             threads: config.max_threads,
-            db: Arc::new(Mutex::new(db)),
             config,
         }
     }
@@ -97,21 +69,8 @@ impl<'a> MissionScanner<'a> {
             self.input_dir,
             self.cache_dir,
             self.threads,
-            &self.db,
             &self.config,
         ).await
-    }
-    
-    /// Get access to the mission database
-    pub fn get_database(&self) -> Arc<Mutex<MissionDatabase>> {
-        self.db.clone()
-    }
-    
-    /// Save the database to disk
-    pub fn save_database(&self) -> Result<()> {
-        let db_path = self.cache_dir.join("mission_database.json");
-        let db = self.db.lock().unwrap();
-        db.save(&db_path)
     }
     
     /// Export scan results to a file

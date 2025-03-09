@@ -3,7 +3,6 @@ use anyhow::Result;
 use mission_scanner::{
     process_mission_directory,
     extract_mission_dependencies,
-    validate_mission_dependencies,
     MissionScannerConfig
 };
 use log::{info, warn, error, LevelFilter};
@@ -37,7 +36,6 @@ async fn main() -> Result<()> {
     let config = MissionScannerConfig {
         max_threads: num_cpus::get(),
         force_rescan: false,
-        skip_validation: false,
         skip_unchanged: true,
         file_extensions: vec![
             "sqm".to_string(),

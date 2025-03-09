@@ -1,4 +1,3 @@
-pub mod database;
 pub mod extractor;
 pub mod scanner;
 pub mod utils;
@@ -6,10 +5,9 @@ pub mod validator;
 pub mod types;
 
 // Re-export main types and functions for easier access
-pub use database::{MissionDatabase, MissionDatabaseStats};
 pub use extractor::{MissionExtractor, types::MissionExtractionResult};
 pub use scanner::{MissionScanner, parse_loadout_file, parse_sqm_file, extract_sqm_dependencies, scan_sqf_file};
-pub use validator::{ClassExistenceValidator, types::ClassExistenceReport};
+pub use validator::types::ClassExistenceReport;
 pub use types::{MissionScanResult, MissionScanStats, SkipReason, MissionScannerConfig};
 
 use std::path::{Path, PathBuf};
@@ -24,7 +22,6 @@ use std::fs;
 /// 1. Scans for mission files
 /// 2. Extracts mission files
 /// 3. Analyzes dependencies
-/// 4. Validates classes (optional)
 /// 
 /// # Parameters
 /// * `input_dir` - Directory containing mission files
@@ -80,16 +77,12 @@ pub async fn process_mission_directory(
     
     info!("Extracted {} mission files", extraction_results.len());
     
-    // Get database stats
-    let db = scanner.get_database();
-    let db_guard = db.lock().unwrap();
-    let stats = db_guard.get_stats();
-    
-    Ok(MissionScanStats {
-        total: stats.total,
-        processed: stats.processed,
-        failed: stats.failed,
-        unchanged: stats.total - stats.processed - stats.failed,
+    // TODO: Implement dependency analysis and validation
+    return Ok(MissionScanStats {
+        total: 0,
+        processed: 0,
+        failed: 0,
+        unchanged: 0,
     })
 }
 
@@ -167,24 +160,4 @@ pub fn extract_mission_dependencies(
     }
     
     Ok(results)
-}
-
-/// Validate mission dependencies against a set of known classes
-/// 
-/// This function checks if all the classes referenced by missions
-/// exist in the provided class database.
-/// 
-/// # Parameters
-/// * `mission_results` - List of mission dependency results
-/// * `processed_classes` - List of known classes to validate against
-/// 
-/// # Returns
-/// A report detailing missing classes and suggestions
-pub fn validate_mission_dependencies(
-    mission_results: &[validator::types::MissionDependencyResult],
-    processed_classes: &[parser_code::Equipment],
-) -> Result<validator::types::ClassExistenceReport> {
-    let mut validator = validator::ClassExistenceValidator::new();
-    validator.load_class_database_from_memory(processed_classes)?;
-    validator.validate_mission_classes(mission_results)
 }
