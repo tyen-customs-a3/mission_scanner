@@ -7,7 +7,6 @@ pub mod types;
 // Re-export main types and functions for easier access
 pub use extractor::{MissionExtractor, types::MissionExtractionResult};
 pub use scanner::{MissionScanner, parse_loadout_file, parse_sqm_file, extract_sqm_dependencies, scan_sqf_file};
-pub use validator::types::ClassExistenceReport;
 pub use types::{MissionScanResult, MissionScanStats, SkipReason, MissionScannerConfig};
 
 use std::path::{Path, PathBuf};

@@ -3,23 +3,6 @@ use anyhow::Result;
 use log::{info, warn, error, debug};
 use walkdir::WalkDir;
 
-/// Calculate hash of a file
-pub fn calculate_file_hash(path: &Path) -> Result<String> {
-    use std::fs::File;
-    use std::io::Read;
-    use sha2::{Sha256, Digest};
-    
-    let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    
-    let mut hasher = Sha256::new();
-    hasher.update(&buffer);
-    let hash = hasher.finalize();
-    
-    Ok(format!("{:x}", hash))
-}
-
 /// Find a file with a specific extension
 pub fn find_file_by_extension(dir: &Path, extension: &str) -> Option<PathBuf> {
     WalkDir::new(dir)

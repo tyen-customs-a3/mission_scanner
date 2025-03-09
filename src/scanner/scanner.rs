@@ -11,6 +11,7 @@ use crate::extractor::types::MissionExtractionResult;
 use crate::extractor::extractor;
 use crate::types::{SkipReason, MissionScannerConfig};
 use super::collector;
+use crate::utils::{find_file_by_extension, find_files_by_extension};
 
 /// Scan and extract mission files with configuration
 pub async fn scan_and_extract_with_config(
@@ -124,9 +125,6 @@ fn scan_mission_files_with_config(
     let mut scan_results = Vec::new();
     
     for path in mission_files {
-        // Calculate hash of the mission file
-        let hash = calculate_file_hash(path)?;
-        
         // Mission needs to be processed
         let mission_name = path.file_stem()
             .unwrap_or_default()
@@ -136,7 +134,6 @@ fn scan_mission_files_with_config(
         let scan_result = MissionScanResult {
             mission_name,
             path: path.to_path_buf(),
-            hash,
         };
         
         scan_results.push(scan_result);
@@ -148,52 +145,6 @@ fn scan_mission_files_with_config(
     Ok(scan_results)
 }
 
-/// Calculate hash of a file
-fn calculate_file_hash(path: &Path) -> Result<String> {
-    use std::fs::File;
-    use std::io::Read;
-    use sha2::{Sha256, Digest};
-    
-    let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    
-    let mut hasher = Sha256::new();
-    hasher.update(&buffer);
-    let hash = hasher.finalize();
-    
-    Ok(format!("{:x}", hash))
-}
-
-/// Find a file with a specific extension
-fn find_file_by_extension(dir: &Path, extension: &str) -> Option<PathBuf> {
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .find(|e| {
-            e.file_type().is_file() && 
-            e.path().extension()
-                .map(|ext| ext.to_string_lossy().to_lowercase() == extension)
-                .unwrap_or(false)
-        })
-        .map(|e| e.path().to_path_buf())
-}
-
-/// Find all files with a specific extension
-fn find_files_by_extension(dir: &Path, extension: &str) -> Vec<PathBuf> {
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().is_file() && 
-            e.path().extension()
-                .map(|ext| ext.to_string_lossy().to_lowercase() == extension)
-                .unwrap_or(false)
-        })
-        .map(|e| e.path().to_path_buf())
-        .collect()
-}
-
 /// Mission scan result
 #[derive(Debug, Clone)]
 struct MissionScanResult {
@@ -201,6 +152,4 @@ struct MissionScanResult {
     mission_name: String,
     /// Path to the mission file
     path: PathBuf,
-    /// Hash of the mission file
-    hash: String,
 } 

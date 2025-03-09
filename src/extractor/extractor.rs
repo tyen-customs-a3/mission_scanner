@@ -11,6 +11,7 @@ use pbo_tools::extract::ExtractOptions;
 
 use crate::types::SkipReason;
 use super::types::{MissionExtractionResult, MissionInfo};
+use crate::utils::{find_file_by_extension, find_files_by_extension};
 
 /// Extract mission files
 pub fn extract_missions(
@@ -47,15 +48,6 @@ pub fn extract_missions(
             Err(e) => {
                 let path = &mission_files[i];
                 warn!("Failed to extract mission {}: {}", path.display(), e);
-                
-                // Calculate hash of the mission file
-                let hash = match calculate_file_hash(path) {
-                    Ok(hash) => hash,
-                    Err(e) => {
-                        warn!("Failed to calculate hash for {}: {}", path.display(), e);
-                        continue;
-                    }
-                };
             }
         }
     }
@@ -117,50 +109,4 @@ pub fn extract_single_mission(cache_dir: &Path, pbo_path: &Path) -> Result<Missi
     info!("Extracted mission in {} ms", start_time.elapsed().as_millis());
     
     Ok(result)
-}
-
-/// Calculate hash of a file
-fn calculate_file_hash(path: &Path) -> Result<String> {
-    use std::fs::File;
-    use std::io::Read;
-    use sha2::{Sha256, Digest};
-    
-    let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    
-    let mut hasher = Sha256::new();
-    hasher.update(&buffer);
-    let hash = hasher.finalize();
-    
-    Ok(format!("{:x}", hash))
-}
-
-/// Find a file with a specific extension in a directory
-fn find_file_by_extension(dir: &Path, extension: &str) -> Option<PathBuf> {
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .find(|e| {
-            e.file_type().is_file() && 
-            e.path().extension()
-                .map(|ext| ext.to_string_lossy().to_lowercase() == extension)
-                .unwrap_or(false)
-        })
-        .map(|e| e.path().to_path_buf())
-}
-
-/// Find all files with a specific extension in a directory
-fn find_files_by_extension(dir: &Path, extension: &str) -> Vec<PathBuf> {
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().is_file() && 
-            e.path().extension()
-                .map(|ext| ext.to_string_lossy().to_lowercase() == extension)
-                .unwrap_or(false)
-        })
-        .map(|e| e.path().to_path_buf())
-        .collect()
 } 
