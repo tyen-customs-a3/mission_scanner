@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 
 /// Result of extracting a mission
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionExtractionResult {
     /// Name of the mission (derived from PBO filename)
     pub mission_name: String,

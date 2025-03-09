@@ -1,17 +1,14 @@
-mod types;
-mod operations;
-
-pub use types::*;
-pub use operations::*;
+pub mod operations;
 
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use log::{info, warn, error};
 use serde::{Serialize, Deserialize};
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::mission_scanner::types::{MissionScanResult, MissionScanStats, SkipReason};
+use crate::types::{MissionScanResult, SkipReason};
 
 /// Database for storing mission scan results
 #[derive(Debug, Clone, Serialize, Deserialize)]

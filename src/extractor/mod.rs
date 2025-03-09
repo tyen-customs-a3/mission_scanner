@@ -1,16 +1,18 @@
 pub mod types;
-mod extractor;
-
-pub use types::*;
-pub use extractor::*;
+pub mod extractor;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use log::{info, warn, error};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+use rayon::prelude::*;
 
-use crate::mission_scanner::database::MissionDatabase;
+use crate::types::SkipReason;
+use crate::database::MissionDatabase;
+
+pub use types::MissionExtractionResult;
+pub use extractor::extract_single_mission;
 
 /// Extractor for mission files
 pub struct MissionExtractor<'a> {

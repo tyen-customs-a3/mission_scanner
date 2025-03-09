@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::collections::HashSet;
+use serde::{Serialize, Deserialize};
 
 /// Result of the mission scanning process
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionScanResult {
     /// Name of the mission
     pub mission_name: String,
@@ -30,7 +31,7 @@ pub struct MissionScanStats {
 }
 
 /// Reason why a mission was skipped during scanning
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SkipReason {
     /// Mission was unchanged since last scan
     Unchanged,
@@ -57,7 +58,7 @@ impl std::fmt::Display for SkipReason {
 }
 
 /// Configuration for the mission scanning process
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionScannerConfig {
     /// Maximum number of threads to use for scanning
     pub max_threads: usize,
@@ -65,4 +66,23 @@ pub struct MissionScannerConfig {
     pub force_rescan: bool,
     /// Whether to skip validation of mission classes
     pub skip_validation: bool,
+    /// Skip extraction if PBO hash hasn't changed (uses database)
+    pub skip_unchanged: bool,
+    /// Extract only specific file extensions (empty = all)
+    pub file_extensions: Vec<String>,
+    /// Recursively scan subdirectories
+    pub recursive: bool,
+}
+
+impl Default for MissionScannerConfig {
+    fn default() -> Self {
+        Self {
+            max_threads: num_cpus::get(),
+            force_rescan: false,
+            skip_validation: false,
+            skip_unchanged: true,
+            file_extensions: vec!["sqm".to_string(), "sqf".to_string(), "cpp".to_string(), "hpp".to_string()],
+            recursive: true,
+        }
+    }
 } 

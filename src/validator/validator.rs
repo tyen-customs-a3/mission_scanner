@@ -3,15 +3,14 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Result, anyhow};
 use log::{info, warn, error, debug};
 
-use crate::mission_scanner::analyzer::types::MissionDependencyResult;
-use crate::code_scanner::class::types::ProcessedClass;
+use parser_code::Equipment;
 use super::ClassExistenceValidator;
-use super::types::{ClassExistenceReport, MissionClassExistenceReport, MissingClassInfo};
+use super::types::{ClassExistenceReport, MissionClassExistenceReport, MissingClassInfo, MissionDependencyResult, ClassDependency};
 
 /// Load class database from memory
 pub fn load_class_database_from_memory(
     validator: &mut ClassExistenceValidator,
-    processed_classes: &[ProcessedClass]
+    processed_classes: &[Equipment]
 ) -> Result<()> {
     info!("Loading class database from memory with {} classes", processed_classes.len());
     
@@ -23,158 +22,164 @@ pub fn load_class_database_from_memory(
     Ok(())
 }
 
-/// Validate mission classes
+/// Validate mission classes against the loaded database
+/// Will return a report of missing classes
 pub fn validate_mission_classes(
     validator: &ClassExistenceValidator,
     mission_results: &[MissionDependencyResult]
 ) -> Result<ClassExistenceReport> {
+    info!("Validating mission classes");
+
+    // Ensure class database is loaded
     if !validator.db_loaded {
-        return Err(anyhow!("Class database not loaded"));
+        return Err(anyhow::anyhow!("Class database not loaded"));
     }
-    
-    info!("Validating classes for {} missions", mission_results.len());
-    
+
+    // Track missing classes across all missions
+    let mut all_missing_classes = HashMap::new();
+    let mut all_class_count = 0;
+
+    // Reports for individual missions
     let mut mission_reports = Vec::new();
-    let mut all_classes = HashSet::new();
-    let mut existing_classes = HashSet::new();
-    let mut missing_classes = HashSet::new();
-    
-    for mission in mission_results {
-        let mission_name = &mission.mission_name;
-        info!("Validating classes for mission: {}", mission_name);
+
+    // Process each mission
+    for mission_result in mission_results {
+        // Track missing classes for this mission
+        let mut missing_classes = HashMap::new();
         
-        let mut mission_existing_classes = HashSet::new();
-        let mut mission_missing_classes = HashMap::new();
+        // Track class statistics
+        let total_classes = mission_result.class_dependencies.len();
+        let mut existing_classes = 0;
         
         // Check each class dependency
-        for dep in &mission.class_dependencies {
-            let class_name = &dep.class_name;
-            all_classes.insert(class_name.clone());
+        for dependency in &mission_result.class_dependencies {
+            all_class_count += 1;
             
-            if validator.class_exists(class_name) {
-                mission_existing_classes.insert(class_name.clone());
-                existing_classes.insert(class_name.clone());
+            // Check if class exists
+            if validator.class_exists(&dependency.class_name) {
+                existing_classes += 1;
             } else {
-                missing_classes.insert(class_name.clone());
-                
-                // Add to mission missing classes
-                let entry = mission_missing_classes.entry(class_name.clone())
-                    .or_insert_with(|| {
-                        MissingClassInfo {
-                            class_name: class_name.clone(),
-                            reference_count: 0,
-                            reference_locations: Vec::new(),
-                            suggested_alternatives: Vec::new(),
-                        }
+                // Add to missing classes for this mission
+                let entry = missing_classes
+                    .entry(dependency.class_name.clone())
+                    .or_insert_with(|| MissingClassInfo {
+                        class_name: dependency.class_name.clone(),
+                        reference_count: 0,
+                        reference_locations: Vec::new(),
+                        suggested_alternatives: Vec::new(),
                     });
                 
                 entry.reference_count += 1;
-                entry.reference_locations.push(format!(
-                    "{}:{} ({})",
-                    dep.source_file.display(),
-                    dep.line_number,
-                    dep.context
-                ));
+                entry.reference_locations.push(format!("{} ({:?})", dependency.context, dependency.reference_type));
+                
+                // Add to all missing classes
+                let entry = all_missing_classes
+                    .entry(dependency.class_name.clone())
+                    .or_insert_with(|| MissingClassInfo {
+                        class_name: dependency.class_name.clone(),
+                        reference_count: 0,
+                        reference_locations: Vec::new(),
+                        suggested_alternatives: Vec::new(),
+                    });
+                
+                entry.reference_count += 1;
+                entry.reference_locations.push(
+                    format!("{} in {} ({:?})", 
+                            dependency.context, 
+                            mission_result.mission_name,
+                            dependency.reference_type)
+                );
             }
         }
         
-        // Find similar classes for missing classes
-        for missing_class in mission_missing_classes.values_mut() {
-            missing_class.suggested_alternatives = validator.find_similar_classes(&missing_class.class_name);
+        // Add suggested alternatives for missing classes
+        for (class_name, missing_info) in missing_classes.iter_mut() {
+            missing_info.suggested_alternatives = validator.find_similar_classes(class_name);
         }
         
-        // Create mission report
-        let total_classes = mission.unique_class_names.len();
-        let existing_count = mission_existing_classes.len();
-        let missing_count = mission_missing_classes.len();
+        // Calculate existence percentage
         let existence_percentage = if total_classes > 0 {
-            (existing_count as f64 / total_classes as f64) * 100.0
+            (existing_classes as f64 / total_classes as f64) * 100.0
         } else {
-            100.0
+            100.0 // If no classes are referenced, all classes exist
         };
         
+        // Create mission report
         let mission_report = MissionClassExistenceReport {
-            mission_name: mission_name.clone(),
+            mission_name: mission_result.mission_name.clone(),
             total_classes,
-            existing_classes: existing_count,
-            missing_classes: missing_count,
+            existing_classes,
+            missing_classes: total_classes - existing_classes,
             existence_percentage,
-            missing_class_list: mission_missing_classes.into_values().collect(),
+            missing_class_list: missing_classes.into_values().collect(),
         };
-        
-        info!("Mission {} has {}% class existence ({}/{} classes exist)",
-            mission_name,
-            existence_percentage,
-            existing_count,
-            total_classes
-        );
         
         mission_reports.push(mission_report);
     }
     
-    // Create overall report
-    let total_unique_classes = all_classes.len();
-    let existing_count = existing_classes.len();
-    let missing_count = missing_classes.len();
+    // Add suggested alternatives for all missing classes
+    for (class_name, missing_info) in all_missing_classes.iter_mut() {
+        missing_info.suggested_alternatives = validator.find_similar_classes(class_name);
+    }
+    
+    // Calculate overall existence percentage
+    let total_unique_classes = all_missing_classes.len() + validator.processed_classes.len();
+    let existing_classes = validator.processed_classes.len();
+    let missing_classes = all_missing_classes.len();
+    
     let existence_percentage = if total_unique_classes > 0 {
-        (existing_count as f64 / total_unique_classes as f64) * 100.0
+        (existing_classes as f64 / total_unique_classes as f64) * 100.0
     } else {
-        100.0
+        100.0 // If no classes are referenced, all classes exist
     };
     
+    // Create overall report
     let report = ClassExistenceReport {
         total_missions: mission_results.len(),
         total_unique_classes,
-        existing_classes: existing_count,
-        missing_classes: missing_count,
+        existing_classes,
+        missing_classes,
         existence_percentage,
         mission_reports,
     };
     
-    info!("Overall class existence: {}% ({}/{} classes exist)",
-        existence_percentage,
-        existing_count,
-        total_unique_classes
-    );
-    
     Ok(report)
 }
 
-/// Find similar classes
+/// Find similar classes to the given class name
 pub fn find_similar_classes(
     validator: &ClassExistenceValidator,
     class_name: &str
 ) -> Vec<String> {
     if !validator.db_loaded {
-        warn!("Class database not loaded");
         return Vec::new();
     }
     
+    // Find classes with similar names (using Levenshtein distance)
     let mut similar_classes = Vec::new();
-    let mut similarities = Vec::new();
     
-    // Find classes with similar names
     for class in &validator.processed_classes {
-        let distance = levenshtein_distance(class_name, &class.name);
-        let max_len = std::cmp::max(class_name.len(), class.name.len());
-        let similarity = if max_len > 0 {
-            1.0 - (distance as f64 / max_len as f64)
-        } else {
-            0.0
-        };
+        // Skip exact matches
+        if class.class_name == class_name {
+            continue;
+        }
         
-        if similarity > 0.7 {
-            similarities.push((class.name.clone(), similarity));
+        // Calculate Levenshtein distance
+        let distance = levenshtein_distance(&class_name.to_lowercase(), &class.class_name.to_lowercase());
+        
+        // Consider similar if distance is less than 25% of the class name length
+        let threshold = (class_name.len() as f64 * 0.25).ceil() as usize;
+        
+        if distance <= threshold {
+            similar_classes.push(class.class_name.clone());
         }
     }
     
-    // Sort by similarity (descending)
-    similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort by Levenshtein distance (closest first)
+    similar_classes.sort_by_key(|name| levenshtein_distance(&class_name.to_lowercase(), &name.to_lowercase()));
     
-    // Take top 5 similar classes
-    for (class_name, _) in similarities.into_iter().take(5) {
-        similar_classes.push(class_name);
-    }
+    // Limit to 5 suggestions
+    similar_classes.truncate(5);
     
     similar_classes
 }

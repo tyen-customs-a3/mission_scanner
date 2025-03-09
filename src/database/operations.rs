@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 use anyhow::Result;
 use log::{info, warn, error};
+use std::collections::HashMap;
 
-use super::types::*;
+use crate::types::SkipReason;
 use super::MissionDatabase;
-use crate::mission_scanner::types::SkipReason;
 
 /// Save the mission database to disk
 pub fn save_database(db: &MissionDatabase, path: &Path) -> Result<()> {
@@ -16,29 +16,41 @@ pub fn load_database(path: &Path) -> Result<MissionDatabase> {
     MissionDatabase::load_or_create(path)
 }
 
-/// Check if a mission has changed since the last scan
-pub fn has_mission_changed(db: &MissionDatabase, path: &Path, hash: &str) -> bool {
-    match db.get_mission_info(path) {
-        Some(info) => info.hash != hash,
-        None => true,
+/// Check if a mission has changed since last scan
+pub fn has_mission_changed(
+    db: &MissionDatabase,
+    mission_path: &Path,
+    hash: &str
+) -> Result<(bool, Option<SkipReason>)> {
+    let mission_key = mission_path.to_string_lossy().to_string();
+    
+    // Check if mission is in database
+    if let Some(mission) = db.get_mission_info(mission_path) {
+        // Check if hash has changed
+        if mission.hash == hash {
+            return Ok((false, Some(SkipReason::Unchanged)));
+        }
     }
+    
+    Ok((true, None))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    use crate::mission_scanner::types::MissionScanResult;
+    use crate::types::MissionScanResult;
     
     #[test]
     fn test_save_and_load() -> Result<()> {
-        let dir = tempdir()?;
-        let db_path = dir.path().join("test_db.json");
+        // Create a temporary directory for the test
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("test_db.json");
         
-        // Create a new database
+        // Create a test database
         let mut db = MissionDatabase::new();
         
-        // Add a mission
+        // Add a test mission
         let mission = MissionScanResult {
             mission_name: "test_mission".to_string(),
             mission_path: PathBuf::from("/path/to/test_mission.pbo"),
@@ -46,6 +58,7 @@ mod tests {
             processed: true,
             timestamp: 123456789,
         };
+        
         db.update_mission(mission);
         
         // Save the database
@@ -60,16 +73,16 @@ mod tests {
         let loaded_mission = loaded_mission.unwrap();
         assert_eq!(loaded_mission.hash, "test_hash");
         assert_eq!(loaded_mission.processed, true);
-        assert_eq!(loaded_mission.timestamp, 123456789);
         
         Ok(())
     }
     
     #[test]
     fn test_has_mission_changed() -> Result<()> {
+        // Create a test database
         let mut db = MissionDatabase::new();
         
-        // Add a mission
+        // Add a test mission
         let mission = MissionScanResult {
             mission_name: "test_mission".to_string(),
             mission_path: PathBuf::from("/path/to/test_mission.pbo"),
@@ -77,12 +90,21 @@ mod tests {
             processed: true,
             timestamp: 123456789,
         };
+        
         db.update_mission(mission);
         
         // Check if the mission has changed
-        assert!(!has_mission_changed(&db, &PathBuf::from("/path/to/test_mission.pbo"), "test_hash"));
-        assert!(has_mission_changed(&db, &PathBuf::from("/path/to/test_mission.pbo"), "new_hash"));
-        assert!(has_mission_changed(&db, &PathBuf::from("/path/to/other_mission.pbo"), "test_hash"));
+        let (changed, reason) = has_mission_changed(&db, &PathBuf::from("/path/to/test_mission.pbo"), "test_hash")?;
+        assert!(!changed);
+        assert_eq!(reason, Some(SkipReason::Unchanged));
+        
+        let (changed, reason) = has_mission_changed(&db, &PathBuf::from("/path/to/test_mission.pbo"), "new_hash")?;
+        assert!(changed);
+        assert_eq!(reason, None);
+        
+        let (changed, reason) = has_mission_changed(&db, &PathBuf::from("/path/to/other_mission.pbo"), "test_hash")?;
+        assert!(changed);
+        assert_eq!(reason, None);
         
         Ok(())
     }

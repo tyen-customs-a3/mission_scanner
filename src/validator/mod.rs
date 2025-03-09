@@ -4,18 +4,18 @@ mod validator;
 pub use types::*;
 pub use validator::*;
 
-use std::path::{Path, PathBuf};
-use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::collections::HashSet;
 use anyhow::Result;
 use log::{info, warn, error, debug};
 
-use crate::mission_scanner::analyzer::types::MissionDependencyResult;
-use crate::code_scanner::class::types::ProcessedClass;
+// Import the Equipment struct from the parser_code crate
+use parser_code::Equipment;
 
 /// Validator for class existence in missions
 pub struct ClassExistenceValidator {
     /// Processed classes for searching
-    processed_classes: Vec<ProcessedClass>,
+    processed_classes: Vec<Equipment>,
     /// Flag indicating if the class database has been loaded
     db_loaded: bool,
 }
@@ -30,7 +30,7 @@ impl ClassExistenceValidator {
     }
     
     /// Load class database from memory
-    pub fn load_class_database_from_memory(&mut self, processed_classes: &[ProcessedClass]) -> Result<()> {
+    pub fn load_class_database_from_memory(&mut self, processed_classes: &[Equipment]) -> Result<()> {
         validator::load_class_database_from_memory(self, processed_classes)
     }
     
@@ -47,7 +47,7 @@ impl ClassExistenceValidator {
         }
         
         self.processed_classes.iter()
-            .any(|c| c.name == class_name)
+            .any(|c| c.class_name == class_name)
     }
     
     /// Find similar classes

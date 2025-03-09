@@ -7,24 +7,29 @@ use tokio::task;
 use futures::future::join_all;
 use walkdir::WalkDir;
 
-use crate::mission_scanner::database::MissionDatabase;
-use crate::mission_scanner::database::operations::has_mission_changed;
-use crate::mission_scanner::extractor::types::MissionExtractionResult;
-use crate::mission_scanner::extractor::extractor;
-use crate::mission_scanner::types::SkipReason;
+use crate::database::MissionDatabase;
+use crate::database::operations::has_mission_changed;
+use crate::extractor::types::MissionExtractionResult;
+use crate::extractor::extractor;
+use crate::types::{SkipReason, MissionScannerConfig};
 use super::collector;
 
-/// Scan and extract mission files
-pub async fn scan_and_extract(
+/// Scan and extract mission files with configuration
+pub async fn scan_and_extract_with_config(
     input_dir: &Path,
     cache_dir: &Path,
     threads: usize,
-    db: &Arc<Mutex<MissionDatabase>>
+    db: &Arc<Mutex<MissionDatabase>>,
+    config: &MissionScannerConfig
 ) -> Result<Vec<MissionExtractionResult>> {
-    info!("Scanning for mission files in {}", input_dir.display());
+    info!("Scanning for mission files in {} with configuration", input_dir.display());
     
     // Collect mission files
-    let mission_files = collector::collect_mission_files(input_dir)?;
+    let mission_files = if config.recursive {
+        collector::collect_mission_files_with_config(input_dir, config)?
+    } else {
+        collector::collect_mission_files(input_dir)?
+    };
     
     if mission_files.is_empty() {
         warn!("No mission files found in {}", input_dir.display());
@@ -33,75 +38,52 @@ pub async fn scan_and_extract(
     
     info!("Found {} mission files", mission_files.len());
     
-    // Create progress bar
-    let progress = ProgressBar::new(mission_files.len() as u64);
-    progress.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("##-")
-    );
-    progress.set_message("Scanning mission files");
+    // Set up progress bars
+    let multi_progress = MultiProgress::new();
     
-    // First, check for cached results
-    let cached_results = collect_cached_results(&mission_files, cache_dir, db)?;
+    let scan_progress = multi_progress.add(ProgressBar::new(mission_files.len() as u64));
+    scan_progress.set_style(ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+        .unwrap()
+        .progress_chars("#>-"));
+    scan_progress.set_message("Scanning mission files");
     
-    if !cached_results.is_empty() {
-        info!("Found {} cached mission results", cached_results.len());
-        progress.finish_with_message(format!("Processed {} mission files", cached_results.len()));
-        return Ok(cached_results);
-    }
-    
-    // Scan mission files
-    let scan_results = scan_mission_files(&mission_files, progress.clone(), db)?;
+    // Filter missions that need to be processed based on config
+    let scan_results = scan_mission_files_with_config(&mission_files, scan_progress, db, config)?;
     
     if scan_results.is_empty() {
-        warn!("No mission files were successfully scanned");
-        progress.finish_with_message("No mission files were successfully scanned");
-        return Ok(Vec::new());
+        info!("No new or changed mission files to process");
+        return collect_cached_results(&mission_files, cache_dir, db);
     }
     
-    info!("Scanned {} mission files", scan_results.len());
+    info!("Processing {} missions", scan_results.len());
     
-    // Extract mission files
-    let mut extraction_results = Vec::new();
-    let mut handles = Vec::new();
-    
-    // Create a thread pool
-    let thread_count = std::cmp::min(threads, scan_results.len());
-    info!("Using {} threads for extraction", thread_count);
-    
-    // Create a progress bar for extraction
-    let extract_progress = ProgressBar::new(scan_results.len() as u64);
-    extract_progress.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.green/blue} {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("##-")
-    );
+    // Extract mission files in parallel
+    let extract_progress = multi_progress.add(ProgressBar::new(scan_results.len() as u64));
+    extract_progress.set_style(ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+        .unwrap()
+        .progress_chars("#>-"));
     extract_progress.set_message("Extracting mission files");
+    
+    let mut handles = Vec::new();
+    let mut unchanged_count = 0;
     
     // Process missions in parallel
     for scan_result in scan_results {
         let cache_dir = cache_dir.to_path_buf();
         let db_clone = db.clone();
         let extract_progress_clone = extract_progress.clone();
+        let config_clone = config.clone();
         
         let handle = task::spawn(async move {
-            let result = match extractor::extract_single_mission(&cache_dir, &scan_result) {
+            let result = match extractor::extract_single_mission(&cache_dir, &scan_result.path) {
                 Ok(result) => {
                     info!("Extracted mission: {}", scan_result.path.display());
                     Some(result)
                 },
                 Err(e) => {
-                    warn!("Failed to extract mission {}: {}", scan_result.path.display(), e);
-                    let mut db = db_clone.lock().unwrap();
-                    db.update_mission_with_reason(
-                        &scan_result.path,
-                        &scan_result.hash,
-                        true,
-                        SkipReason::ExtractionFailed,
-                    );
+                    error!("Failed to extract mission {}: {}", scan_result.path.display(), e);
                     None
                 }
             };
@@ -116,77 +98,97 @@ pub async fn scan_and_extract(
     // Wait for all extraction tasks to complete
     let results = join_all(handles).await;
     
-    // Collect successful results
+    // Process results
+    let mut extraction_results = Vec::new();
+    
     for result in results {
         if let Ok(Some(extraction_result)) = result {
             extraction_results.push(extraction_result);
         }
     }
     
-    extract_progress.finish_with_message(format!("Extracted {} mission files", extraction_results.len()));
+    info!("Extracted {} mission files", extraction_results.len());
+    extract_progress.finish_with_message(format!("Extracted {} missions", extraction_results.len()));
     
-    // Save the database
-    let db_path = cache_dir.join("mission_db.json");
-    if let Err(e) = db.lock().unwrap().save(&db_path) {
-        warn!("Failed to save mission database: {}", e);
+    // Add previously processed missions from the database
+    if !config.force_rescan {
+        for path in &mission_files {
+            if !extraction_results.iter().any(|er| er.pbo_path == *path) {
+                if let Ok(cached_result) = load_cached_mission(cache_dir, path) {
+                    debug!("Using cached result for {}", path.display());
+                    extraction_results.push(cached_result);
+                }
+            }
+        }
     }
     
     Ok(extraction_results)
 }
 
-/// Scan mission files
-fn scan_mission_files(
+/// Scan and extract mission files
+pub async fn scan_and_extract(
+    input_dir: &Path,
+    cache_dir: &Path,
+    threads: usize,
+    db: &Arc<Mutex<MissionDatabase>>
+) -> Result<Vec<MissionExtractionResult>> {
+    // Use default config
+    let config = MissionScannerConfig::default();
+    scan_and_extract_with_config(input_dir, cache_dir, threads, db, &config).await
+}
+
+/// Scan mission files with configuration options
+fn scan_mission_files_with_config(
     mission_files: &[PathBuf],
     progress: ProgressBar,
-    db: &Arc<Mutex<MissionDatabase>>
+    db: &Arc<Mutex<MissionDatabase>>,
+    config: &MissionScannerConfig
 ) -> Result<Vec<MissionScanResult>> {
     let mut scan_results = Vec::new();
     
     for path in mission_files {
         // Calculate hash of the mission file
-        let hash = match calculate_file_hash(path) {
-            Ok(hash) => hash,
-            Err(e) => {
-                warn!("Failed to calculate hash for {}: {}", path.display(), e);
+        let hash = calculate_file_hash(path)?;
+        
+        // Check if the mission has changed if we're not forcing a rescan
+        if !config.force_rescan && config.skip_unchanged {
+            let has_changed = {
+                let db_guard = db.lock().unwrap();
+                has_mission_changed(&db_guard, path, &hash)?
+            };
+            
+            if !has_changed.0 {
+                debug!("Mission unchanged: {}", path.display());
+                let mut db = db.lock().unwrap();
+                db.update_mission_with_reason(
+                    path,
+                    &hash,
+                    false,
+                    has_changed.1.unwrap_or(SkipReason::Unchanged)
+                );
+                
                 progress.inc(1);
                 continue;
             }
-        };
-        
-        // Check if the mission has changed
-        let has_changed = {
-            let db = db.lock().unwrap();
-            has_mission_changed(&db, path, &hash)
-        };
-        
-        if !has_changed {
-            debug!("Mission unchanged: {}", path.display());
-            let mut db = db.lock().unwrap();
-            db.update_mission_with_reason(
-                path,
-                &hash,
-                false,
-                SkipReason::Unchanged,
-            );
-            progress.inc(1);
-            continue;
         }
         
-        // Create scan result
+        // Mission needs to be processed
         let mission_name = path.file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-            
+        
         let scan_result = MissionScanResult {
             mission_name,
-            path: path.clone(),
+            path: path.to_path_buf(),
             hash,
         };
         
         scan_results.push(scan_result);
         progress.inc(1);
     }
+    
+    progress.finish_with_message(format!("Scanned {} missions", mission_files.len()));
     
     Ok(scan_results)
 }

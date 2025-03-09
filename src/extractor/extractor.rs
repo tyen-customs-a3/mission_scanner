@@ -9,8 +9,8 @@ use rayon::prelude::*;
 use pbo_tools::core::api::{PboApi, PboApiOps};
 use pbo_tools::extract::ExtractOptions;
 
-use crate::mission_scanner::database::MissionDatabase;
-use crate::mission_scanner::types::SkipReason;
+use crate::database::MissionDatabase;
+use crate::types::SkipReason;
 use super::types::{MissionExtractionResult, MissionInfo};
 
 /// Extract mission files
@@ -80,72 +80,60 @@ pub fn extract_missions(
     Ok(extraction_results)
 }
 
-/// Extract a single mission
+/// Extract a single mission file
 pub fn extract_single_mission(cache_dir: &Path, pbo_path: &Path) -> Result<MissionExtractionResult> {
     info!("Extracting mission: {}", pbo_path.display());
     
     let start_time = Instant::now();
     
-    // Get the mission name from the PBO filename
+    // Create a unique output directory for this mission
     let mission_name = pbo_path.file_stem()
-        .ok_or_else(|| anyhow!("Invalid PBO path"))?
+        .ok_or_else(|| anyhow!("Invalid PBO file name"))?
         .to_string_lossy()
         .to_string();
     
-    // Create the output directory
     let output_dir = cache_dir.join(&mission_name);
+    
+    // Create the output directory if it doesn't exist
     if !output_dir.exists() {
         std::fs::create_dir_all(&output_dir)?;
     }
     
     // Extract the PBO file
-    let api = PboApi::new(Some(30))?;
+    let api = PboApi::new(30);
     
     // Configure extraction options
     let mut options = ExtractOptions::default();
     options.verbose = true;
-    options.treat_warnings_as_errors = false;
-    options.pause_on_error = false;
+    options.warnings_as_errors = false;
+    options.no_pause = true;
     
     // Extract the PBO file
     api.extract_with_options(pbo_path, &output_dir, options)?;
     
-    // Check if the extraction was successful
-    let extracted_files_on_disk = WalkDir::new(&output_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count();
-        
-    if extracted_files_on_disk == 0 {
-        return Err(anyhow!("No files were extracted from the PBO"));
-    }
-    
     // Find mission.sqm file
     let sqm_file = find_file_by_extension(&output_dir, "sqm");
     
-    // Find SQF files
+    // Find all SQF script files
     let sqf_files = find_files_by_extension(&output_dir, "sqf");
     
-    // Find CPP/HPP files
+    // Find all CPP/HPP config files
     let mut cpp_files = find_files_by_extension(&output_dir, "cpp");
     cpp_files.extend(find_files_by_extension(&output_dir, "hpp"));
     
-    let extraction_time = start_time.elapsed().as_millis() as u64;
-    
-    info!("Extracted mission {} in {}ms", mission_name, extraction_time);
-    info!("  SQM file: {}", sqm_file.as_ref().map_or("None".to_string(), |p| p.display().to_string()));
-    info!("  SQF files: {}", sqf_files.len());
-    info!("  CPP/HPP files: {}", cpp_files.len());
-    
-    Ok(MissionExtractionResult {
+    // Create extraction result
+    let result = MissionExtractionResult {
         mission_name,
         pbo_path: pbo_path.to_path_buf(),
         extracted_path: output_dir,
         sqm_file,
         sqf_files,
         cpp_files,
-    })
+    };
+    
+    info!("Extracted mission in {} ms", start_time.elapsed().as_millis());
+    
+    Ok(result)
 }
 
 /// Calculate hash of a file
@@ -165,7 +153,7 @@ fn calculate_file_hash(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hash))
 }
 
-/// Find a file with a specific extension
+/// Find a file with a specific extension in a directory
 fn find_file_by_extension(dir: &Path, extension: &str) -> Option<PathBuf> {
     WalkDir::new(dir)
         .into_iter()
@@ -179,7 +167,7 @@ fn find_file_by_extension(dir: &Path, extension: &str) -> Option<PathBuf> {
         .map(|e| e.path().to_path_buf())
 }
 
-/// Find all files with a specific extension
+/// Find all files with a specific extension in a directory
 fn find_files_by_extension(dir: &Path, extension: &str) -> Vec<PathBuf> {
     WalkDir::new(dir)
         .into_iter()
