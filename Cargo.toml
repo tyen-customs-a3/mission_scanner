@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    ".",
+    "parsers/parser_code",
+    "parsers/parser_sqf",
+    "parsers/parser_sqm"
+]
+
 [package]
 name = "mission_scanner"
 version = "0.1.0"
