@@ -1,13 +1,12 @@
 pub mod extractor;
 pub mod scanner;
 pub mod utils;
-pub mod validator;
 pub mod types;
 
 // Re-export main types and functions for easier access
 pub use extractor::{MissionExtractor, types::MissionExtractionResult};
 pub use scanner::{MissionScanner, parse_loadout_file, parse_sqm_file, extract_sqm_dependencies, scan_sqf_file};
-pub use types::{MissionScanResult, MissionScanStats, SkipReason, MissionScannerConfig};
+pub use types::{MissionScanResult, MissionScanStats, SkipReason, MissionScannerConfig, MissionDependencyResult, ClassDependency, ReferenceType};
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -99,7 +98,7 @@ pub async fn process_mission_directory(
 pub fn extract_mission_dependencies(
     cache_dir: &Path,
     missions: &[MissionExtractionResult],
-) -> Result<Vec<validator::types::MissionDependencyResult>> {
+) -> Result<Vec<MissionDependencyResult>> {
     let mut results = Vec::new();
     
     for mission in missions {
@@ -109,9 +108,9 @@ pub fn extract_mission_dependencies(
         if let Some(sqm_path) = &mission.sqm_file {
             let sqm_deps = extract_sqm_dependencies(sqm_path)?;
             for class_name in sqm_deps {
-                dependencies.push(validator::types::ClassDependency {
+                dependencies.push(ClassDependency {
                     class_name,
-                    reference_type: validator::types::ReferenceType::Direct,
+                    reference_type: ReferenceType::Direct,
                     context: format!("SQM file: {}", sqm_path.file_name().unwrap_or_default().to_string_lossy()),
                 });
             }
@@ -121,9 +120,9 @@ pub fn extract_mission_dependencies(
         for sqf_path in &mission.sqf_files {
             if let Ok(references) = scan_sqf_file(sqf_path) {
                 for reference in references {
-                    dependencies.push(validator::types::ClassDependency {
+                    dependencies.push(ClassDependency {
                         class_name: reference.class_name,
-                        reference_type: validator::types::ReferenceType::Variable,
+                        reference_type: ReferenceType::Variable,
                         context: format!("SQF file: {}", sqf_path.file_name().unwrap_or_default().to_string_lossy()),
                     });
                 }
@@ -134,16 +133,16 @@ pub fn extract_mission_dependencies(
         for cpp_path in &mission.cpp_files {
             if let Ok(equipment) = parse_loadout_file(cpp_path) {
                 for equip in equipment {
-                    dependencies.push(validator::types::ClassDependency {
+                    dependencies.push(ClassDependency {
                         class_name: equip.class_name,
-                        reference_type: validator::types::ReferenceType::Direct,
+                        reference_type: ReferenceType::Direct,
                         context: format!("CPP file: {}", cpp_path.file_name().unwrap_or_default().to_string_lossy()),
                     });
                     
                     if let Some(parent) = equip.parent_class {
-                        dependencies.push(validator::types::ClassDependency {
+                        dependencies.push(ClassDependency {
                             class_name: parent,
-                            reference_type: validator::types::ReferenceType::Inheritance,
+                            reference_type: ReferenceType::Inheritance,
                             context: format!("CPP file: {}", cpp_path.file_name().unwrap_or_default().to_string_lossy()),
                         });
                     }
@@ -151,7 +150,7 @@ pub fn extract_mission_dependencies(
             }
         }
         
-        results.push(validator::types::MissionDependencyResult {
+        results.push(MissionDependencyResult {
             mission_name: mission.mission_name.clone(),
             mission_path: mission.pbo_path.clone(),
             class_dependencies: dependencies,
