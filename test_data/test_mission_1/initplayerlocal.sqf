@@ -1,0 +1,1 @@
+0 = execVM 'loadouts\arsenal.sqf';

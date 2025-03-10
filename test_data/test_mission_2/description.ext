@@ -1,0 +1,62 @@
+tmf_version[] = {1,1,0};
+cba_settings_hasSettingsFile = 1;
+enableDebugConsole[] = {"76561198076377130"};
+enableTargetDebug = 1;
+respawnButton = 1; 
+
+class CfgDebriefingSections
+{
+	class tmf_adminlog
+	{
+		title = "TMF Log";
+		variable = "TMF_adminmenu_debrief";
+	};
+	class acex_killTracker
+	{
+		title = "ACEX Killed Events";
+		variable = "acex_killTracker_outputText";
+	};
+};
+
+class CfgDebriefing
+{
+	class Success
+	{
+		title = "Mission Success";
+		subtitle = "";
+		description = "";
+	};
+	class Failed
+	{
+		title = "Mission Failed";
+		subtitle = "";
+		description = "";
+	};
+	class SpecialEnding1
+	{
+		title = "Mission Inconclusive";
+		subtitle = "";
+		description = "";
+	};
+};
+
+#include "loadouts\_macros.hpp"
+
+class CfgLoadouts
+{
+	class P_BLUE_FARMER_LOADOUT
+	{
+		displayName = "Blue Farmer Loadout";
+		#include "loadouts\p_blue_farmer_loadout.hpp"
+	};
+	class P_YELLOW_FARMER_LOADOUT
+	{
+		displayName = "Yellow Farmer Loadout";
+		#include "loadouts\p_yellow_farmer_loadout.hpp"
+	};
+};
+
+class CfgFunctions
+{
+	#include "jebus\cfgFunctions.hpp"
+};
