@@ -2,6 +2,23 @@ use std::path::PathBuf;
 use std::collections::HashSet;
 use serde::{Serialize, Deserialize};
 
+/// Result of analyzing a mission directory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionExtractionResult {
+    /// Name of the mission
+    pub mission_name: String,
+    /// Path to the original mission directory
+    pub pbo_path: PathBuf,
+    /// Path to the mission directory
+    pub mission_dir: PathBuf,
+    /// Path to the mission.sqm file if found
+    pub sqm_file: Option<PathBuf>,
+    /// Paths to all SQF script files
+    pub sqf_files: Vec<PathBuf>,
+    /// Paths to all CPP/HPP config files
+    pub cpp_files: Vec<PathBuf>,
+}
+
 /// Result of analyzing mission dependencies
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionDependencyResult {

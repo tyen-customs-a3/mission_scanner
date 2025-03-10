@@ -5,8 +5,7 @@ use log::debug;
 use std::fs;
 
 use super::*;
-use crate::types::MissionScannerConfig;
-use crate::extractor::types::MissionExtractionResult;
+use crate::types::{MissionScannerConfig, MissionExtractionResult};
 
 /// Helper function to get the test data directory
 fn get_test_data_dir() -> PathBuf {
@@ -177,14 +176,14 @@ fn test_mission_file_structure() -> Result<()> {
         .expect("test_mission_1 should exist");
     
     // Verify directory structure
-    assert!(mission1.extracted_path.ends_with("test_mission_1"), "Extracted path should be correct");
+    assert!(mission1.mission_dir.ends_with("test_mission_1"), "Extracted path should be correct");
     
     // Verify loadouts directory exists and contains files
-    let loadouts_dir = mission1.extracted_path.join("loadouts");
+    let loadouts_dir = mission1.mission_dir.join("loadouts");
     assert!(loadouts_dir.exists(), "loadouts directory should exist");
     
     // Verify briefing directory exists
-    let briefing_dir = mission1.extracted_path.join("briefing");
+    let briefing_dir = mission1.mission_dir.join("briefing");
     assert!(briefing_dir.exists(), "briefing directory should exist");
     
     // Count total number of files
@@ -221,7 +220,7 @@ fn test_mission_class_contents() -> Result<()> {
         .expect("test_mission_1 should exist");
     
     // Test enemy loadout file classes
-    let loadout_path = mission1.extracted_path.join("loadouts").join("enemy_loadout.hpp");
+    let loadout_path = mission1.mission_dir.join("loadouts").join("enemy_loadout.hpp");
     let loadout_classes = parse_loadout_file(&loadout_path)?;
     
     // Verify base class exists
@@ -262,7 +261,7 @@ fn test_mission_class_contents() -> Result<()> {
     assert!(mg_weapon.contains(&"rhs_weap_pkp".to_string()), "Should find PKP");
     
     // Test arsenal.sqf contents
-    let arsenal_path = mission1.extracted_path.join("loadouts").join("arsenal.sqf");
+    let arsenal_path = mission1.mission_dir.join("loadouts").join("arsenal.sqf");
     let content = fs::read_to_string(&arsenal_path)?;
     
     // Check for specific equipment in arsenal
@@ -331,7 +330,7 @@ fn test_mission_file_dependencies() -> Result<()> {
     }
     
     // Test enemy loadout dependencies
-    let loadout_path = mission1.extracted_path.join("loadouts").join("enemy_loadout.hpp");
+    let loadout_path = mission1.mission_dir.join("loadouts").join("enemy_loadout.hpp");
     let loadout_deps = parse_loadout_file(&loadout_path)?;
     
     // Verify equipment dependencies through properties
