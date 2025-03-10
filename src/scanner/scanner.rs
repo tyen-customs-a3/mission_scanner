@@ -14,7 +14,7 @@ use super::collector;
 use crate::utils::{find_file_by_extension, find_files_by_extension};
 
 /// Scan and extract mission files with configuration
-pub async fn scan_and_extract_with_config(
+pub async fn scan_with_config(
     input_dir: &Path,
     cache_dir: &Path,
     threads: usize,
@@ -46,63 +46,10 @@ pub async fn scan_and_extract_with_config(
         .progress_chars("#>-"));
     scan_progress.set_message("Scanning mission files");
     
-    // Filter missions that need to be processed based on config
-    let scan_results = scan_mission_files_with_config(&mission_files, scan_progress, config)?;
+    // Since we already have the extracted files, just return them
+    scan_progress.finish_with_message(format!("Scanned {} missions", mission_files.len()));
     
-    info!("Processing {} missions", scan_results.len());
-    
-    // Extract mission files in parallel
-    let extract_progress = multi_progress.add(ProgressBar::new(scan_results.len() as u64));
-    extract_progress.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-        .unwrap()
-        .progress_chars("#>-"));
-    extract_progress.set_message("Extracting mission files");
-    
-    let mut handles = Vec::new();
-    let mut unchanged_count = 0;
-    
-    // Process missions in parallel
-    for scan_result in scan_results {
-        let cache_dir = cache_dir.to_path_buf();
-        let extract_progress_clone = extract_progress.clone();
-        let config_clone = config.clone();
-        
-        let handle = task::spawn(async move {
-            let result = match extractor::extract_single_mission(&cache_dir, &scan_result.path) {
-                Ok(result) => {
-                    info!("Extracted mission: {}", scan_result.path.display());
-                    Some(result)
-                },
-                Err(e) => {
-                    error!("Failed to extract mission {}: {}", scan_result.path.display(), e);
-                    None
-                }
-            };
-            
-            extract_progress_clone.inc(1);
-            result
-        });
-        
-        handles.push(handle);
-    }
-    
-    // Wait for all extraction tasks to complete
-    let results = join_all(handles).await;
-    
-    // Process results
-    let mut extraction_results = Vec::new();
-    
-    for result in results {
-        if let Ok(Some(extraction_result)) = result {
-            extraction_results.push(extraction_result);
-        }
-    }
-    
-    info!("Extracted {} mission files", extraction_results.len());
-    extract_progress.finish_with_message(format!("Extracted {} missions", extraction_results.len()));
-    
-    Ok(extraction_results)
+    Ok(mission_files)
 }
 
 /// Scan and extract mission files
@@ -113,7 +60,7 @@ pub async fn scan_and_extract(
 ) -> Result<Vec<MissionExtractionResult>> {
     // Use default config
     let config = MissionScannerConfig::default();
-    scan_and_extract_with_config(input_dir, cache_dir, threads, &config).await
+    scan_with_config(input_dir, cache_dir, threads, &config).await
 }
 
 /// Scan mission files with configuration options

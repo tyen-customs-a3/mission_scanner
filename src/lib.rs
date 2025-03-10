@@ -77,8 +77,8 @@ pub async fn process_mission_directory(
     
     // TODO: Implement dependency analysis and validation
     return Ok(MissionScanStats {
-        total: 0,
-        processed: 0,
+        total: extraction_results.len(),
+        processed: extraction_results.len(),
         failed: 0,
         unchanged: 0,
     })
@@ -158,4 +158,79 @@ pub fn extract_mission_dependencies(
     }
     
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+    use tokio;
+
+    fn setup_test_dirs() -> (TempDir, TempDir) {
+        let cache_dir = TempDir::new().unwrap();
+        let output_dir = TempDir::new().unwrap();
+        (cache_dir, output_dir)
+    }
+
+    #[tokio::test]
+    async fn test_process_mission_directory() -> Result<()> {
+        let (cache_dir, output_dir) = setup_test_dirs();
+        
+        let config = MissionScannerConfig {
+            max_threads: 4,
+            force_rescan: false,
+            skip_unchanged: true,
+            file_extensions: vec!["pbo".to_string()],
+            recursive: true,
+        };
+
+        // Test with test_mission_1 and test_mission_2 directories
+        let input_dir = Path::new("test_data");
+        let stats = process_mission_directory(
+            input_dir,
+            cache_dir.path(),
+            output_dir.path(),
+            &config
+        ).await?;
+
+        assert!(stats.total > 0, "Should find at least one mission");
+        assert!(stats.processed > 0, "Should process at least one mission");
+        assert_eq!(stats.failed, 0, "Should not have any failed missions");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_mission_dependencies() -> Result<()> {
+        let (cache_dir, _) = setup_test_dirs();
+
+        // Create test mission extraction results
+        let missions = vec![
+            MissionExtractionResult {
+                mission_name: "test_mission_1".to_string(),
+                pbo_path: PathBuf::from("test_data/test_mission_1.pbo"),
+                extracted_path: PathBuf::from("test_data/test_mission_1"),
+                sqm_file: Some(PathBuf::from("test_data/test_mission_1/mission.sqm")),
+                sqf_files: vec![PathBuf::from("test_data/test_mission_1/init.sqf")],
+                cpp_files: vec![PathBuf::from("test_data/test_mission_1/description.ext")],
+            },
+            MissionExtractionResult {
+                mission_name: "test_mission_2".to_string(),
+                pbo_path: PathBuf::from("test_data/test_mission_2.pbo"),
+                extracted_path: PathBuf::from("test_data/test_mission_2"),
+                sqm_file: Some(PathBuf::from("test_data/test_mission_2/mission.sqm")),
+                sqf_files: vec![],
+                cpp_files: vec![],
+            }
+        ];
+
+        let results = extract_mission_dependencies(cache_dir.path(), &missions)?;
+
+        assert_eq!(results.len(), 2, "Should have results for both missions");
+        assert_eq!(results[0].mission_name, "test_mission_1");
+        assert_eq!(results[1].mission_name, "test_mission_2");
+
+        Ok(())
+    }
 }

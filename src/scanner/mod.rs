@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 mod collector;
 mod scanner;
 mod parser_integration;
@@ -65,7 +68,7 @@ impl<'a> MissionScanner<'a> {
     
     /// Scan and extract mission files
     pub async fn scan_and_extract(&self) -> Result<Vec<MissionExtractionResult>> {
-        scanner::scan_and_extract_with_config(
+        scanner::scan_with_config(
             self.input_dir,
             self.cache_dir,
             self.threads,
