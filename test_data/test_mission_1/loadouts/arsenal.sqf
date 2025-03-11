@@ -131,7 +131,7 @@ private _itemEquipment =
 	"ACRE_PRC148",
 	"ACRE_PRC152",
 	"ACRE_PRC117F"
-
+];
 
 
 private _itemMod =

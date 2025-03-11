@@ -92,18 +92,18 @@ pub fn extract_mission_dependencies(
             }
         }
         
-        // Process SQF files
-        for sqf_path in &mission.sqf_files {
-            if let Ok(references) = scan_sqf_file(sqf_path) {
-                for reference in references {
-                    dependencies.push(crate::types::ClassDependency {
-                        class_name: reference.class_name.clone(),
-                        reference_type: crate::types::ReferenceType::Variable,
-                        context: format!("SQF file: {}", sqf_path.file_name().unwrap_or_default().to_string_lossy()),
-                    });
-                }
-            }
-        }
+        // // Process SQF files
+        // for sqf_path in &mission.sqf_files {
+        //     if let Ok(references) = scan_sqf_file(sqf_path) {
+        //         for reference in references {
+        //             dependencies.push(crate::types::ClassDependency {
+        //                 class_name: reference.class_name.clone(),
+        //                 reference_type: crate::types::ReferenceType::Variable,
+        //                 context: format!("SQF file: {}", sqf_path.file_name().unwrap_or_default().to_string_lossy()),
+        //             });
+        //         }
+        //     }
+        // }
         
         // Process CPP/HPP files
         for cpp_path in &mission.cpp_files {

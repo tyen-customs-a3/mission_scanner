@@ -4,7 +4,6 @@ use anyhow::{Result, anyhow};
 use log::{info, debug, warn, error};
 
 use parser_code::parse_loadout;
-use parser_sqf::scan_equipment_references;
 use parser_sqm::parse_sqm;
 use parser_sqm::extract_class_dependencies;
 
@@ -52,24 +51,36 @@ pub fn extract_sqm_dependencies(file_path: &Path) -> Result<std::collections::Ha
     let content = fs::read_to_string(file_path)
         .map_err(|e| anyhow!("Failed to read SQM file: {}", e))?;
     
-    // Extract dependencies
-    let dependencies = extract_class_dependencies(&content);
+    let mut dependencies = std::collections::HashSet::new();
+    
+    // First extract addons array
+    if let Some(addons_start) = content.find("addons[] = {") {
+        let addons_end = content[addons_start..].find("};")
+            .map(|end| addons_start + end + 2)
+            .unwrap_or(content.len());
+        
+        let addons_str = &content[addons_start..addons_end];
+        let addons_list = addons_str.split('{').nth(1)
+            .and_then(|s| s.split('}').next())
+            .unwrap_or("");
+        
+        for addon in addons_list.split(',') {
+            let addon = addon.trim().trim_matches('"');
+            if !addon.is_empty() {
+                dependencies.insert(addon.to_string());
+            }
+        }
+    }
+    
+    // Then extract class dependencies
+    dependencies.extend(extract_class_dependencies(&content));
     debug!("Extracted {} class dependencies from SQM file", dependencies.len());
     
     Ok(dependencies)
 }
 
 /// Scan a SQF file for equipment references
-pub fn scan_sqf_file(file_path: &Path) -> Result<std::collections::HashSet<parser_sqf::EquipmentReference>> {
-    debug!("Scanning SQF file for equipment references: {}", file_path.display());
+pub fn scan_sqf_file(file_path: &Path)  {
+    // todo
     
-    // Read the file contents
-    let content = fs::read_to_string(file_path)
-        .map_err(|e| anyhow!("Failed to read SQF file: {}", e))?;
-    
-    // Scan for equipment references
-    let references = scan_equipment_references(&content);
-    debug!("Found {} equipment references in SQF file", references.len());
-    
-    Ok(references)
 } 

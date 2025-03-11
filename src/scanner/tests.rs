@@ -204,80 +204,9 @@ fn test_mission_file_structure() -> Result<()> {
 }
 
 #[test]
-fn test_mission_class_contents() -> Result<()> {
-    use crate::scanner::parse_sqm_file;
-    use crate::scanner::parse_loadout_file;
-    use crate::scanner::scan_sqf_file;
-    use parser_code::Equipment;
-    use parser_sqm::InventoryClass;
-    
-    let test_dir = get_test_data_dir();
-    let mission_files = collector::collect_mission_files(&test_dir)?;
-    
-    // Find test_mission_1
-    let mission1 = mission_files.iter()
-        .find(|m| m.mission_name == "test_mission_1")
-        .expect("test_mission_1 should exist");
-    
-    // Test enemy loadout file classes
-    let loadout_path = mission1.mission_dir.join("loadouts").join("enemy_loadout.hpp");
-    let loadout_classes = parse_loadout_file(&loadout_path)?;
-    
-    // Verify base class exists
-    let base_class = loadout_classes.iter()
-        .find(|e| e.class_name == "baseMan")
-        .expect("Should find baseMan class");
-    
-    // Verify base class equipment
-    let uniform_options = base_class.properties.get("uniform").expect("Should have uniform options");
-    assert!(uniform_options.contains(&"rhs_uniform_emr_patchless".to_string()), "Should find EMR uniform");
-    assert!(uniform_options.contains(&"rhs_uniform_gorka_r_g".to_string()), "Should find Gorka uniform");
-    
-    let vest_options = base_class.properties.get("vest").expect("Should have vest options");
-    assert!(vest_options.contains(&"rhs_6b23_6sh116".to_string()), "Should find 6b23 vest");
-    assert!(vest_options.contains(&"rhs_6b23_digi_6sh92".to_string()), "Should find digi vest");
-    
-    let headgear_options = base_class.properties.get("headgear").expect("Should have headgear options");
-    assert!(headgear_options.contains(&"rhs_6b27m_digi".to_string()), "Should find 6b27m helmet");
-    assert!(headgear_options.contains(&"rhs_6b47".to_string()), "Should find 6b47 helmet");
-    
-    // Verify role classes exist and their equipment
-    let rifleman = loadout_classes.iter()
-        .find(|e| e.class_name == "r")
-        .expect("Should find rifleman class");
-    let primary_weapon = rifleman.properties.get("primaryWeapon").expect("Should have primary weapon");
-    assert!(primary_weapon.contains(&"rhs_weap_ak74m".to_string()), "Should find AK-74M");
-    
-    let grenadier = loadout_classes.iter()
-        .find(|e| e.class_name == "g")
-        .expect("Should find grenadier class");
-    let grenadier_weapon = grenadier.properties.get("primaryWeapon").expect("Should have primary weapon");
-    assert!(grenadier_weapon.contains(&"rhs_weap_ak74m_gp25".to_string()), "Should find AK-74M GP-25");
-    
-    let mg = loadout_classes.iter()
-        .find(|e| e.class_name == "mg")
-        .expect("Should find machine gunner class");
-    let mg_weapon = mg.properties.get("primaryWeapon").expect("Should have primary weapon");
-    assert!(mg_weapon.contains(&"rhs_weap_pkp".to_string()), "Should find PKP");
-    
-    // Test arsenal.sqf contents
-    let arsenal_path = mission1.mission_dir.join("loadouts").join("arsenal.sqf");
-    let content = fs::read_to_string(&arsenal_path)?;
-    
-    // Check for specific equipment in arsenal
-    assert!(content.contains("\"Tarkov_Uniforms_1\""), "Should find Tarkov uniform");
-    assert!(content.contains("\"V_PlateCarrier2_blk\""), "Should find plate carrier");
-    assert!(content.contains("\"H_HelmetSpecB_blk\""), "Should find spec ops helmet");
-    assert!(content.contains("\"rhs_weap_hk416d145\""), "Should find HK416");
-    
-    Ok(())
-}
-
-#[test]
-fn test_mission_file_dependencies() -> Result<()> {
+fn test_mission_class_dependencies() -> Result<()> {
     use crate::scanner::extract_sqm_dependencies;
     use crate::scanner::parse_loadout_file;
-    use parser_code::Equipment;
     
     let test_dir = get_test_data_dir();
     let mission_files = collector::collect_mission_files(&test_dir)?;
@@ -289,83 +218,177 @@ fn test_mission_file_dependencies() -> Result<()> {
     
     // Test mission.sqm dependencies
     let sqm_path = mission1.sqm_file.as_ref().unwrap();
-    let content = fs::read_to_string(sqm_path)?;
-    
-    // Find and verify addons array
-    if let Some(addons_start) = content.find("addons[] = {") {
-        let addons_end = content[addons_start..].find("};").unwrap() + addons_start + 2;
-        let addons_str = &content[addons_start..addons_end];
-        
-        // Extract addon names
-        let mut dependencies = std::collections::HashSet::new();
-        let addons_list = addons_str.split('{').nth(1).unwrap().split('}').next().unwrap();
-        for addon in addons_list.split(',') {
-            let addon = addon.trim().trim_matches('"');
-            if !addon.is_empty() {
-                dependencies.insert(addon.to_string());
-            }
+    let dependencies = extract_sqm_dependencies(sqm_path)?;
+
+    // Expected addon dependencies from mission.sqm
+    // Expected equipment items from mission.sqm
+    let mission_sqm_items = [
+        // Unit inventory weapons
+        "rhs_weap_mg42",
+        "rhsusf_weap_glock17g4",
+        // Unit inventory magazines
+        "rhsgref_50Rnd_792x57_SmE_drum",
+        "rhsusf_mag_17Rnd_9x19_JHP",
+        // Unit inventory equipment
+        "TC_U_aegis_guerilla_garb_m81_sudan",
+        "rhsusf_spcs_ocp_saw",
+        "pca_eagle_a3_od",
+        "simc_pasgt_m81",
+        // Unit inventory items
+        "ACRE_BF888S",
+        "ACE_fieldDressing",
+        "ACE_packingBandage",
+        "ACE_tourniquet",
+        "ACE_epinephrine",
+        "ACE_morphine",
+        "ACE_splint",
+        "ItemMap",
+        "ItemCompass",
+        "ItemWatch"
+    ];
+
+    // Expected items from enemy_loadout.hpp
+    let enemy_loadout_items = [
+        // Uniforms
+        "rhs_uniform_emr_patchless",
+        "rhs_uniform_gorka_r_g",
+        // Vests
+        "rhs_6b23_6sh116",
+        "rhs_6b23_6sh116_vog",
+        "rhs_6b23_digi_6sh92",
+        "rhs_6b23_digi_6sh92_spetsnaz",
+        // Backpacks
+        "rhs_assault_umbts",
+        // Headgear
+        "rhs_6b27m_digi",
+        "rhs_6b47",
+        "rhs_6b7_1m",
+        "rhs_6b7_1m_emr",
+        // Weapons
+        "rhs_weap_ak74m",
+        "rhs_weap_ak74m_gp25",
+        "rhs_weap_pkp",
+        "rhs_weap_rpg26",
+        "rhs_weap_rpg7",
+        // Weapon attachments
+        "rhs_acc_1p63",
+        "rhs_acc_ekp1",
+        "rhs_acc_pgo7v3",
+        // Magazines and grenades
+        "rhs_30Rnd_545x39_7N10_AK",
+        "rhs_VOG25",
+        "rhs_GRD40_White",
+        "rhs_100Rnd_762x54mmR",
+        "rhs_rpg7_PG7V_mag",
+        "rhs_rpg7_PG7VL_mag"
+    ];
+
+    // Expected items from player_loadout.hpp
+    let player_loadout_items = [
+        // Uniforms
+        "U_I_L_Uniform_01_tshirt_sport_F",
+        "U_I_L_Uniform_01_tshirt_skull_F",
+        "CUP_I_B_PMC_Unit_19",
+        "CUP_I_B_PMC_Unit_12",
+        // Vests
+        "V_HarnessOGL_brn",
+        "usm_vest_lbe_gr",
+        "usm_vest_lbe_machinegunner",
+        // Backpacks
+        "aegis_carryall_blk",
+        "B_AssaultPack_mcamo",
+        "B_TacticalPack_mcamo",
+        // Weapons
+        "rhs_weap_m1garand_sa43",
+        "CUP_lmg_PKM",
+        "rhs_weap_m79",
+        "rhs_weap_m82a1",
+        "rhs_weap_akms",
+        // Sidearms
+        "rhs_weap_makarov_pm",
+        "CUP_hgun_TEC9",
+        // Magazines
+        "rhsusf_mag_10Rnd_STD_50BMG_M33",
+        "rhsusf_mag_10Rnd_STD_50BMG_mk211",
+        "CUP_32Rnd_9x19_TEC9",
+        "rhs_30Rnd_762x39mm_bakelite",
+        "rhs_30Rnd_762x39mm_bakelite_tracer"
+    ];
+
+    // Expected items from arsenal.sqf
+    let arsenal_items = [
+        // Uniforms
+        "Tarkov_Uniforms_1",
+        "Tarkov_Uniforms_2",
+        // Vests
+        "V_PlateCarrier2_blk",
+        "V_PlateCarrier1_blk",
+        // Helmets
+        "H_HelmetSpecB_blk",
+        "H_HelmetSpecB_snakeskin",
+        // Backpacks
+        "rhs_tortila_black",
+        // NVGs
+        "rhsusf_ANPVS_15",
+        // Radios
+        "ACRE_PRC343",
+        "ACRE_PRC148",
+        "ACRE_PRC152",
+        "ACRE_PRC117F",
+        // ACE Items
+        "ACE_Flashlight_XL50",
+        "ACE_MapTools",
+        "ACE_RangeCard",
+        // Equipment
+        "ItemCompass",
+        "ItemMap",
+        "ItemWatch",
+        "Binocular",
+        "Rangefinder",
+        // Grenades and Flares
+        "ACE_40mm_Flare_green",
+        "ACE_40mm_Flare_red",
+        "UGL_FlareGreen_F",
+        "UGL_FlareRed_F",
+        "1Rnd_SmokeBlue_Grenade_shell",
+        "SmokeShellBlue",
+        "SmokeShellGreen"
+    ];
+
+    // Verify all items from each file are found in dependencies
+    let mut missing_items = Vec::new();
+
+    // Check mission.sqm items
+    for item in &mission_sqm_items {
+        if !dependencies.contains(&item.to_string()) {
+            missing_items.push(format!("mission.sqm item: {}", item));
         }
-        
-        // Verify core dependencies
-        assert!(dependencies.contains("A3_Characters_F"), "Should find A3_Characters_F");
-        assert!(dependencies.contains("A3_Characters_F_Mark"), "Should find A3_Characters_F_Mark");
-        
-        // Verify RHS dependencies
-        assert!(dependencies.contains("rhsgref_c_troops"), "Should find RHS troops");
-        assert!(dependencies.contains("rhsgref_c_vehicles_ret"), "Should find RHS vehicles");
-        
-        // Verify CUP dependencies
-        assert!(dependencies.contains("CUP_Misc_e_Config"), "Should find CUP misc config");
-        assert!(dependencies.contains("CUP_WheeledVehicles_Kamaz"), "Should find CUP Kamaz");
-        assert!(dependencies.contains("CUP_AirVehicles_Mi8"), "Should find CUP Mi-8");
-        assert!(dependencies.contains("CUP_Creatures_Military_Russia"), "Should find CUP Russian military");
-        
-        // Verify structure dependencies
-        assert!(dependencies.contains("A3_Structures_F_Walls"), "Should find walls");
-        assert!(dependencies.contains("A3_Structures_F_Civ_Market"), "Should find market structures");
-        assert!(dependencies.contains("A3_Structures_F_EPA_Mil_Scrapyard"), "Should find scrapyard");
-        assert!(dependencies.contains("A3_Structures_F_Exp_Military_Fortifications"), "Should find fortifications");
-    } else {
-        panic!("Could not find addons array in mission.sqm");
     }
-    
-    // Test enemy loadout dependencies
-    let loadout_path = mission1.mission_dir.join("loadouts").join("enemy_loadout.hpp");
-    let loadout_deps = parse_loadout_file(&loadout_path)?;
-    
-    // Verify equipment dependencies through properties
-    let base_class = loadout_deps.iter()
-        .find(|e| e.class_name == "baseMan")
-        .expect("Should find baseMan class");
-    
-    // Check uniform dependencies
-    let uniform_deps = base_class.properties.get("uniform").expect("Should have uniform dependencies");
-    assert!(uniform_deps.contains(&"rhs_uniform_emr_patchless".to_string()), "Should find EMR uniform");
-    assert!(uniform_deps.contains(&"rhs_uniform_gorka_r_g".to_string()), "Should find Gorka uniform");
-    
-    // Check vest dependencies
-    let vest_deps = base_class.properties.get("vest").expect("Should have vest dependencies");
-    assert!(vest_deps.contains(&"rhs_6b23_6sh116".to_string()), "Should find 6b23 vest");
-    assert!(vest_deps.contains(&"rhs_6b23_digi_6sh92".to_string()), "Should find digi vest");
-    
-    // Check weapon dependencies from role classes
-    let rifleman = loadout_deps.iter()
-        .find(|e| e.class_name == "r")
-        .expect("Should find rifleman class");
-    let primary_weapon = rifleman.properties.get("primaryWeapon").expect("Should have primary weapon");
-    assert!(primary_weapon.contains(&"rhs_weap_ak74m".to_string()), "Should find AK-74M");
-    
-    let mg = loadout_deps.iter()
-        .find(|e| e.class_name == "mg")
-        .expect("Should find machine gunner class");
-    let mg_weapon = mg.properties.get("primaryWeapon").expect("Should have primary weapon");
-    assert!(mg_weapon.contains(&"rhs_weap_pkp".to_string()), "Should find PKP");
-    
-    let rpg = loadout_deps.iter()
-        .find(|e| e.class_name == "rrpg")
-        .expect("Should find RPG class");
-    let rpg_weapon = rpg.properties.get("secondaryWeapon").expect("Should have secondary weapon");
-    assert!(rpg_weapon.contains(&"rhs_weap_rpg7".to_string()), "Should find RPG-7");
-    
+
+    // Check enemy loadout items
+    for item in &enemy_loadout_items {
+        if !dependencies.contains(&item.to_string()) {
+            missing_items.push(format!("enemy_loadout.hpp: {}", item));
+        }
+    }
+
+    // Check player loadout items
+    for item in &player_loadout_items {
+        if !dependencies.contains(&item.to_string()) {
+            missing_items.push(format!("player_loadout.hpp: {}", item));
+        }
+    }
+
+    // Check arsenal items
+    for item in &arsenal_items {
+        if !dependencies.contains(&item.to_string()) {
+            missing_items.push(format!("arsenal.sqf: {}", item));
+        }
+    }
+
+    // If any items are missing, fail the test with details
+    assert!(missing_items.is_empty(), 
+        "Missing dependencies:\n{}", missing_items.join("\n"));
+
     Ok(())
 } 
