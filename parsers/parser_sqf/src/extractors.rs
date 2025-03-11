@@ -21,10 +21,34 @@ pub fn try_extract_item(command_name: &str, arg: &Expression) -> Option<ItemRefe
         "addHeadgear" => Some(ItemKind::Headgear),
         "addGoggles" => Some(ItemKind::Goggles),
         "addItem" => Some(ItemKind::Item),
+        "ace_arsenal_fnc_initBox" => Some(ItemKind::Item),
         _ => None
     }?;
 
     Some(ItemReference { item_id, kind })
+}
+
+pub fn try_extract_items_from_array(expr: &Expression) -> Vec<ItemReference> {
+    match expr {
+        Expression::Array(elements, _) => {
+            elements.iter()
+                .filter_map(|element| {
+                    extract_string_arg(element)
+                        .map(|item_id| ItemReference {
+                            item_id,
+                            kind: ItemKind::Item
+                        })
+                })
+                .collect()
+        },
+        Expression::Variable(name, _) => {
+            vec![ItemReference {
+                item_id: name.clone(),
+                kind: ItemKind::Item
+            }]
+        },
+        _ => Vec::new()
+    }
 }
 
 #[cfg(test)]

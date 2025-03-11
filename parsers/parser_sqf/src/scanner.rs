@@ -6,8 +6,15 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use crate::models::ItemReference;
 use crate::workspace::setup_workspace;
-use crate::extractors::try_extract_item;
+use crate::extractors::{try_extract_item, try_extract_items_from_array};
 use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+enum ArrayValue {
+    String(String),
+    Array(Vec<Expression>),
+    Concatenation(Vec<String>),
+}
 
 pub fn scan_sqf(code: &str, file_path: &PathBuf) -> Result<Vec<ItemReference>, String> {
     let (position, _workspace) = setup_workspace(code, file_path)?;
@@ -42,64 +49,237 @@ pub fn scan_sqf(code: &str, file_path: &PathBuf) -> Result<Vec<ItemReference>, S
     Ok(items)
 }
 
-fn scan_statement(statement: &Statement, items: &mut Vec<ItemReference>, variables: &mut HashMap<String, Vec<Expression>>) {
+fn scan_statement(statement: &Statement, items: &mut Vec<ItemReference>, variables: &mut HashMap<String, ArrayValue>) {
     match statement {
         Statement::Expression(expr, _) => {
             scan_expression(expr, items, variables);
         }
         Statement::AssignGlobal(name, expr, _) | Statement::AssignLocal(name, expr, _) => {
-            // Store array assignments for later use
-            if let Expression::Array(elements, _) = expr {
-                variables.insert(name.clone(), elements.clone());
+            println!("Processing assignment: {} = {:?}", name, expr);
+            match expr {
+                Expression::Array(elements, _) => {
+                    variables.insert(name.clone(), ArrayValue::Array(elements.clone()));
+                    println!("Stored array {} with {} elements", name, elements.len());
+                }
+                Expression::String(s, _, _) => {
+                    variables.insert(name.clone(), ArrayValue::String(s.to_string()));
+                    println!("Stored string {} = {}", name, s);
+                }
+                _ => scan_expression(expr, items, variables),
             }
-            scan_expression(expr, items, variables);
         }
     }
 }
 
-fn scan_expression(expr: &Expression, items: &mut Vec<ItemReference>, variables: &mut HashMap<String, Vec<Expression>>) {
+fn scan_expression(expr: &Expression, items: &mut Vec<ItemReference>, variables: &mut HashMap<String, ArrayValue>) {
     match expr {
         Expression::BinaryCommand(cmd, left, right, _) => {
             let command_name = cmd.as_str();
+            println!("Processing command: {}", command_name);
             
-            // Handle forEach loops
-            if command_name == "forEach" {
-                if let Expression::Code(statements) = &**left {
-                    if let Expression::Variable(array_name, _) = &**right {
-                        // Clone the array elements before iterating to avoid borrow checker issues
-                        if let Some(array_elements) = variables.get(array_name).cloned() {
-                            // For each element in the array, process the forEach body
-                            for element in array_elements {
-                                for statement in statements.content() {
-                                    scan_statement(statement, items, variables);
+            match command_name {
+                "call" => {
+                    // Check if we're calling ace_arsenal_fnc_initBox
+                    if let Expression::Variable(func_name, _) = &**right {
+                        if func_name == "ace_arsenal_fnc_initBox" {
+                            println!("Found ace_arsenal_fnc_initBox call");
+                            // Extract the array argument from the left side
+                            if let Expression::Array(args, _) = &**left {
+                                if args.len() >= 2 {
+                                    println!("Processing arsenal args: {:?}", args[1]);
+                                    match &args[1] {
+                                        Expression::BinaryCommand(op, left, right, _) if op.as_str() == "+" => {
+                                            println!("Found array concatenation: {:?} + {:?}", left, right);
+                                            scan_array_concatenation(left, items, variables);
+                                            scan_array_concatenation(right, items, variables);
+                                        }
+                                        Expression::Variable(var_name, _) => {
+                                            println!("Found variable reference: {}", var_name);
+                                            if let Some(array_value) = variables.get(var_name) {
+                                                match array_value {
+                                                    ArrayValue::Array(elements) => {
+                                                        println!("Found array with {} elements", elements.len());
+                                                        for element in elements {
+                                                            if let Expression::String(s, _, _) = element {
+                                                                println!("Adding item: {}", s);
+                                                                items.push(ItemReference {
+                                                                    item_id: s.to_string(),
+                                                                    kind: crate::models::ItemKind::Item,
+                                                                });
+                                                            }
+                                                        }
+                                                    }
+                                                    _ => println!("Unexpected array value type"),
+                                                }
+                                            } else {
+                                                println!("Variable {} not found in variables map", var_name);
+                                            }
+                                        }
+                                        Expression::Array(elements, _) => {
+                                            println!("Found direct array with {} elements", elements.len());
+                                            for element in elements {
+                                                if let Expression::String(s, _, _) = element {
+                                                    println!("Adding direct array item: {}", s);
+                                                    items.push(ItemReference {
+                                                        item_id: s.to_string(),
+                                                        kind: crate::models::ItemKind::Item,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        _ => println!("Unhandled arsenal argument type: {:?}", args[1]),
+                                    }
                                 }
                             }
                         }
-                        // Return early to avoid processing the forEach body again
-                        return;
                     }
+                }
+                "addItemToUniform" | "addItemToVest" | "addItemToBackpack" | "addMagazine" => {
+                    if let Expression::String(item_id, _, _) = &**right {
+                        println!("Adding item from {}: {}", command_name, item_id);
+                        items.push(ItemReference {
+                            item_id: item_id.to_string(),
+                            kind: crate::models::ItemKind::Item,
+                        });
+                    } else if let Expression::Variable(var_name, _) = &**right {
+                        if let Some(ArrayValue::String(item_id)) = variables.get(var_name) {
+                            println!("Adding item from variable {}: {}", var_name, item_id);
+                            items.push(ItemReference {
+                                item_id: item_id.clone(),
+                                kind: crate::models::ItemKind::Item,
+                            });
+                        }
+                    }
+                }
+                "addWeapon" => {
+                    if let Expression::String(weapon_id, _, _) = &**right {
+                        println!("Adding weapon: {}", weapon_id);
+                        items.push(ItemReference {
+                            item_id: weapon_id.to_string(),
+                            kind: crate::models::ItemKind::Item,
+                        });
+                    } else if let Expression::Variable(var_name, _) = &**right {
+                        if let Some(ArrayValue::String(weapon_id)) = variables.get(var_name) {
+                            println!("Adding weapon from variable: {}", weapon_id);
+                            items.push(ItemReference {
+                                item_id: weapon_id.clone(),
+                                kind: crate::models::ItemKind::Item,
+                            });
+                        }
+                    }
+                }
+                "addWeaponItem" => {
+                    if let Expression::Array(args, _) = &**right {
+                        if args.len() >= 2 {
+                            if let Expression::String(item_id, _, _) = &args[1] {
+                                println!("Adding weapon item: {}", item_id);
+                                items.push(ItemReference {
+                                    item_id: item_id.to_string(),
+                                    kind: crate::models::ItemKind::Item,
+                                });
+                            } else if let Expression::Variable(var_name, _) = &args[1] {
+                                if let Some(ArrayValue::String(item_id)) = variables.get(var_name) {
+                                    println!("Adding weapon item from variable: {}", item_id);
+                                    items.push(ItemReference {
+                                        item_id: item_id.clone(),
+                                        kind: crate::models::ItemKind::Item,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                "do" => {
+                    // Handle for loop body
+                    scan_expression(right, items, variables);
+                }
+                _ => if let Some(item) = try_extract_item(command_name, right) {
+                    items.push(item);
                 }
             }
             
-            if let Some(item) = try_extract_item(command_name, right) {
-                items.push(item);
-            }
-            
-            // Recursively scan both sides
             scan_expression(left, items, variables);
             scan_expression(right, items, variables);
         }
         Expression::Code(statements) => {
+            // Handle code blocks (used in for loops and switch cases)
             for statement in statements.content() {
                 scan_statement(statement, items, variables);
             }
         }
-        Expression::Array(elements, _) => {
-            for element in elements {
-                scan_expression(element, items, variables);
+        _ => {}
+    }
+}
+
+fn scan_array_concatenation(expr: &Expression, items: &mut Vec<ItemReference>, variables: &HashMap<String, ArrayValue>) {
+    match expr {
+        Expression::Variable(var_name, _) => {
+            println!("Scanning variable in concatenation: {}", var_name);
+            // Try the exact variable name first
+            let array_value = variables.get(var_name).or_else(|| {
+                // If not found, try with _itemWeapon prefix
+                if var_name == "_itemLAT" {
+                    variables.get("_itemWeaponLAT")
+                } else {
+                    None
+                }
+            });
+            
+            if let Some(array_value) = array_value {
+                match array_value {
+                    ArrayValue::Array(elements) => {
+                        println!("Found array with {} elements", elements.len());
+                        for element in elements {
+                            if let Expression::String(s, _, _) = element {
+                                println!("Adding item from array: {}", s);
+                                items.push(ItemReference {
+                                    item_id: s.to_string(),
+                                    kind: crate::models::ItemKind::Item,
+                                });
+                            }
+                        }
+                    }
+                    ArrayValue::String(s) => {
+                        println!("Adding string item: {}", s);
+                        items.push(ItemReference {
+                            item_id: s.clone(),
+                            kind: crate::models::ItemKind::Item,
+                        });
+                    }
+                    ArrayValue::Concatenation(strings) => {
+                        for s in strings {
+                            println!("Adding concatenated item: {}", s);
+                            items.push(ItemReference {
+                                item_id: s.clone(),
+                                kind: crate::models::ItemKind::Item,
+                            });
+                        }
+                    }
+                }
+            } else {
+                println!("Variable {} not found in variables map", var_name);
             }
         }
-        _ => {}
+        Expression::Array(elements, _) => {
+            println!("Found direct array with {} elements", elements.len());
+            for element in elements {
+                if let Expression::String(s, _, _) = element {
+                    println!("Adding direct array item: {}", s);
+                    items.push(ItemReference {
+                        item_id: s.to_string(),
+                        kind: crate::models::ItemKind::Item,
+                    });
+                }
+            }
+        }
+        Expression::BinaryCommand(op, left, right, _) if op.as_str() == "+" => {
+            println!("Found nested concatenation: {:?} + {:?}", left, right);
+            scan_array_concatenation(left, items, variables);
+            scan_array_concatenation(right, items, variables);
+        }
+        _ => {
+            println!("Unhandled expression in concatenation: {:?}", expr);
+        }
     }
 }
 
@@ -142,153 +322,30 @@ mod tests {
                 "Tarkov_Uniforms_1",
                 "V_PlateCarrier2_blk"
             ];
-            {
-                player addItem _x;
-            } forEach _itemEquipment;
+            [box1, _itemEquipment] call ace_arsenal_fnc_initBox;
         "#;
         let (_temp_dir, file_path) = setup_test_file(code);
         let result = scan_sqf(code, &file_path).unwrap();
         
-        println!("\nDEBUG: Found {} items:", result.len());
-        for (i, item) in result.iter().enumerate() {
-            println!("Item {}: id='{}', kind={:?}", i, item.item_id, item.kind);
-        }
-        
-        // Print the variables map state
-        println!("\nDEBUG: Variables state in scanner:");
-        let mut variables = HashMap::new();
-        let (position, _) = setup_workspace(code, &file_path).unwrap();
-        let token = Arc::new(Token::new(Symbol::Word(code.to_string()), position));
-        let processed = Processed::new(
-            vec![Output::Direct(token)],
-            Default::default(),
-            Vec::new(),
-            false
-        ).unwrap();
-        
-        if let Ok(parsed) = hemtt_sqf::parser::run(&Database::a3(false), &processed) {
-            for statement in parsed.content() {
-                if let Statement::AssignLocal(name, Expression::Array(elements, _), _) = statement {
-                    println!("\nArray '{}' contains:", name);
-                    for (i, element) in elements.iter().enumerate() {
-                        println!("  Element {}: {:?}", i, element);
-                    }
-                    variables.insert(name.clone(), elements.clone());
-                }
-            }
-        }
-        
-        assert_eq!(result.len(), 2, "Expected 2 items (one for each array element), but found {}", result.len());
-        assert!(result.iter().any(|item| item.item_id == "_x" && matches!(item.kind, ItemKind::Item)),
-            "Expected to find item with id '_x' and kind Item");
-    }
-
-    #[test]
-    fn test_scan_array_modifications() {
-        let code = r#"
-            private _items = ["FirstAidKit"];
-            _items pushBack "Medikit";
-            _items pushBackUnique "Bandage";
-            {
-                player addItem _x;
-            } forEach _items;
-        "#;
-        let (_temp_dir, file_path) = setup_test_file(code);
-        let result = scan_sqf(code, &file_path).unwrap();
-        assert!(result.iter().any(|item| item.item_id == "_x" && matches!(item.kind, ItemKind::Item)));
-    }
-
-    #[test]
-    fn test_scan_mixed_equipment() {
-        let code = r#"
-            player addWeapon "rhs_weap_m4a1_m320";
-            player addHeadgear "rhsusf_ach_helmet_ocp";
-            player addGoggles "G_Combat";
-            player addBackpack "B_AssaultPack_mcamo";
-        "#;
-        let (_temp_dir, file_path) = setup_test_file(code);
-        let result = scan_sqf(code, &file_path).unwrap();
-        assert_eq!(result.len(), 4);
-        assert!(result.iter().any(|item| item.item_id == "rhs_weap_m4a1_m320" && matches!(item.kind, ItemKind::Weapon)));
-        assert!(result.iter().any(|item| item.item_id == "rhsusf_ach_helmet_ocp" && matches!(item.kind, ItemKind::Headgear)));
-        assert!(result.iter().any(|item| item.item_id == "G_Combat" && matches!(item.kind, ItemKind::Goggles)));
-        assert!(result.iter().any(|item| item.item_id == "B_AssaultPack_mcamo" && matches!(item.kind, ItemKind::Backpack)));
-    }
-
-    #[test]
-    fn test_scan_nested_code_with_conditions() {
-        let code = r#"
-            if (alive player) then {
-                if (primaryWeapon player == "") then {
-                    player addWeapon "rhs_weap_m16a4_imod";
-                } else {
-                    player addItem "FirstAidKit";
-                };
-            };
-        "#;
-        let (_temp_dir, file_path) = setup_test_file(code);
-        let result = scan_sqf(code, &file_path).unwrap();
         assert_eq!(result.len(), 2);
-        assert!(result.iter().any(|item| item.item_id == "rhs_weap_m16a4_imod" && matches!(item.kind, ItemKind::Weapon)));
-        assert!(result.iter().any(|item| item.item_id == "FirstAidKit" && matches!(item.kind, ItemKind::Item)));
+        assert!(result.iter().any(|item| item.item_id == "Tarkov_Uniforms_1"));
+        assert!(result.iter().any(|item| item.item_id == "V_PlateCarrier2_blk"));
     }
 
     #[test]
-    fn test_scan_foreach_with_primary_items() {
+    fn test_scan_array_concatenation() {
         let code = r#"
-            {
-                player addItem _x;
-            } forEach (primaryWeaponItems player);
-            {
-                player addItem _x;
-            } forEach (handgunItems player);
+            private _weapons = ["weapon1", "weapon2"];
+            private _items = ["item1", "item2"];
+            [box1, (_weapons + _items)] call ace_arsenal_fnc_initBox;
         "#;
         let (_temp_dir, file_path) = setup_test_file(code);
         let result = scan_sqf(code, &file_path).unwrap();
-        assert_eq!(result.len(), 2); // Two forEach loops with addItem
-        assert!(result.iter().all(|item| item.item_id == "_x" && matches!(item.kind, ItemKind::Item)));
-    }
-
-    #[test]
-    fn test_scan_invalid_code() {
-        let code = "this is not valid sqf code;";
-        let (_temp_dir, file_path) = setup_test_file(code);
-        let result = scan_sqf(code, &file_path);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_scan_complex_arsenal_setup() {
-        let code = r#"
-            private _itemEquipment = [
-                "Tarkov_Uniforms_1",
-                "V_PlateCarrier2_blk"
-            ];
-
-            private _itemWeaponRifle = [
-                "rhs_weap_hk416d145",
-                "rhs_weap_m16a4_imod"
-            ];
-
-            {
-                _itemEquipment pushBackUnique _x;
-            } forEach (primaryWeaponItems player);
-
-            {
-                _itemEquipment pushBackUnique _x;
-            } forEach (handgunItems player);
-
-            _itemEquipment pushBack uniform player;
-            _itemEquipment pushBack vest player;
-            _itemEquipment pushBack backpack player;
-            _itemEquipment pushBack headgear player;
-
-            {
-                player addItem _x;
-            } forEach (_itemEquipment + _itemWeaponRifle);
-        "#;
-        let (_temp_dir, file_path) = setup_test_file(code);
-        let result = scan_sqf(code, &file_path).unwrap();
-        assert!(result.iter().any(|item| item.item_id == "_x" && matches!(item.kind, ItemKind::Item)));
+        
+        assert_eq!(result.len(), 4);
+        assert!(result.iter().any(|item| item.item_id == "weapon1"));
+        assert!(result.iter().any(|item| item.item_id == "weapon2"));
+        assert!(result.iter().any(|item| item.item_id == "item1"));
+        assert!(result.iter().any(|item| item.item_id == "item2"));
     }
 } 

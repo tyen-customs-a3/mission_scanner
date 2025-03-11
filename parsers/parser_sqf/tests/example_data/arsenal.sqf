@@ -13,7 +13,6 @@
 arsenal = "building" createVehicleLocal [0,0,0];
 player setVariable ["startpos", getPosASL player];
 
-
 //Define Arsenal items
 private _itemEquipment = 
 [
@@ -22,8 +21,8 @@ private _itemEquipment =
 		
 	
 	//Vests
-		"V_PlateCarrier2_blk",
-
+		"V_PlateCarrier2_blk"
+];
 
 
 private _itemMod =
@@ -59,7 +58,6 @@ private _itemWeaponLAT =
 	"rhs_weap_M136"
 ];
 
-
 private _itemWeaponAmmo =
 [
 	//Rifle Ammo
@@ -85,8 +83,6 @@ private _itemWeaponAmmo =
 
 ];
 
-
-
 //Add Existing Player Items
 {
     _itemEquipment pushBackUnique _x;
@@ -107,7 +103,6 @@ _itemEquipment pushBack headgear player;
 
 //Match unitrole name with the classnames in loadout.
 	[arsenal, (_itemEquipment + _itemMod + _itemLAT + _itemWeaponRifle + _itemWeaponAmmo)] call ace_arsenal_fnc_initBox;
-
 
 _action = 
 [
