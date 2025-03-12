@@ -8,10 +8,21 @@
 */
 
 //Variables
-
-
 arsenal = "building" createVehicleLocal [0,0,0];
 player setVariable ["startpos", getPosASL player];
+
+// First add items with explicit types
+_unit addWeapon "rhs_weap_hk416d145";
+_unit addWeapon "rhs_weap_m16a4_imod";
+_unit addWeapon "rhs_weap_m4a1_m320";
+_unit addWeapon "rhs_weap_M136";
+
+_unit addMagazine "rhs_mag_30Rnd_556x45_M855A1_Stanag";
+_unit addMagazine "rhsusf_200Rnd_556x45_M855_mixed_soft_pouch";
+
+_unit addUniform "Tarkov_Uniforms_1";
+_unit addVest "V_PlateCarrier2_blk";
+_unit addBackpack "rhsusf_spcs_ocp_saw";
 
 //Define Arsenal items
 private _itemEquipment = 

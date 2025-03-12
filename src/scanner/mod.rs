@@ -13,12 +13,7 @@ use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 use crate::types::{MissionExtractionResult, MissionScannerConfig};
 
 // Re-export parsing functions for easier access
-pub use parser_integration::{
-    parse_loadout_file,
-    parse_sqm_file,
-    extract_sqm_dependencies,
-    scan_sqf_file,
-};
+pub use parser_integration::parse_file;
 
 // Re-export scanner functionality
 pub use scanner::{scan_with_config, scan};
@@ -82,47 +77,22 @@ pub fn extract_mission_dependencies(
         
         // Process SQM file if available
         if let Some(sqm_path) = &mission.sqm_file {
-            let sqm_deps = extract_sqm_dependencies(sqm_path)?;
-            for class_name in sqm_deps {
-                dependencies.push(crate::types::ClassDependency {
-                    class_name,
-                    reference_type: crate::types::ReferenceType::Direct,
-                    context: format!("SQM file: {}", sqm_path.file_name().unwrap_or_default().to_string_lossy()),
-                });
+            if let Ok(deps) = parse_file(sqm_path) {
+                dependencies.extend(deps);
             }
         }
         
-        // // Process SQF files
-        // for sqf_path in &mission.sqf_files {
-        //     if let Ok(references) = scan_sqf_file(sqf_path) {
-        //         for reference in references {
-        //             dependencies.push(crate::types::ClassDependency {
-        //                 class_name: reference.class_name.clone(),
-        //                 reference_type: crate::types::ReferenceType::Variable,
-        //                 context: format!("SQF file: {}", sqf_path.file_name().unwrap_or_default().to_string_lossy()),
-        //             });
-        //         }
-        //     }
-        // }
+        // Process SQF files
+        for sqf_path in &mission.sqf_files {
+            if let Ok(deps) = parse_file(sqf_path) {
+                dependencies.extend(deps);
+            }
+        }
         
         // Process CPP/HPP files
         for cpp_path in &mission.cpp_files {
-            if let Ok(equipment) = parse_loadout_file(cpp_path) {
-                for equip in equipment {
-                    dependencies.push(crate::types::ClassDependency {
-                        class_name: equip.class_name,
-                        reference_type: crate::types::ReferenceType::Direct,
-                        context: format!("CPP file: {}", cpp_path.file_name().unwrap_or_default().to_string_lossy()),
-                    });
-                    
-                    if let Some(parent) = equip.parent_class {
-                        dependencies.push(crate::types::ClassDependency {
-                            class_name: parent,
-                            reference_type: crate::types::ReferenceType::Inheritance,
-                            context: format!("CPP file: {}", cpp_path.file_name().unwrap_or_default().to_string_lossy()),
-                        });
-                    }
-                }
+            if let Ok(deps) = parse_file(cpp_path) {
+                dependencies.extend(deps);
             }
         }
         

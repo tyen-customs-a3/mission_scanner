@@ -42,7 +42,7 @@ pub struct ClassDependency {
 }
 
 /// Type of reference to a class
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceType {
     /// Direct reference to a class
     Direct,

@@ -1,6 +1,7 @@
 //! Core data structures for SQF parsing and analysis
 
 use hemtt_sqf::Expression;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemKind {
@@ -10,6 +11,19 @@ pub enum ItemKind {
     Vest,
     Uniform,
     Item,
+}
+
+impl fmt::Display for ItemKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ItemKind::Weapon => write!(f, "weapon"),
+            ItemKind::Magazine => write!(f, "magazine"),
+            ItemKind::Backpack => write!(f, "backpack"),
+            ItemKind::Vest => write!(f, "vest"),
+            ItemKind::Uniform => write!(f, "uniform"),
+            ItemKind::Item => write!(f, "item"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +39,7 @@ pub struct ItemContext {
     pub scope: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AnalysisResult {
     pub items: Vec<ItemContext>,
 }

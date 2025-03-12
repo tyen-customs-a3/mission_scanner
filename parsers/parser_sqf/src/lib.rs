@@ -3,10 +3,17 @@
 //! This module provides functionality to parse SQF files and extract item references
 //! from various commands like addBackpack, addWeapon, etc.
 
+// Declare modules
+mod models;
+mod analyzer;
+
 use std::path::Path;
 use std::fs;
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::fmt;
+use std::io;
+
 use hemtt_sqf::{Statements, StringWrapper};
 use hemtt_sqf::parser::{run as parse_sqf, database::Database, ParserError};
 use hemtt_sqf::parser::lexer::{strip_comments, strip_noop};
@@ -15,56 +22,60 @@ use hemtt_common::config::PDriveOption;
 use hemtt_sqf::Error as SqfError;
 use hemtt_preprocessor::Processor;
 use crate::analyzer::Analyzer;
+use crate::models::{ItemReference, ItemContext};
 
-pub mod models;
-pub mod analyzer;
+// Re-export public types
+pub use models::ItemKind;
 
-// Re-export the public interface
-pub use crate::models::{ItemReference, ItemKind, ItemContext, AnalysisResult};
-pub use crate::analyzer::analyze_sqf;
-
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("Parser error: {0}")]
-    ParserError(#[from] ParserError),
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error("Workspace error: {0}")]
-    WorkspaceError(#[from] WorkspaceError),
-    #[error("SQF error: {0}")]
-    SqfError(#[from] SqfError),
-    #[error("Invalid token: {0}")]
-    InvalidToken(String),
-    #[error("Unparseable syntax: {0}")]
+    IoError(io::Error),
+    ParserError(ParserError),
+    WorkspaceError(WorkspaceError),
     UnparseableSyntax(String),
-    #[error("Preprocessor error: {0}")]
-    PreprocessorError(String),
+    SqfError(SqfError),
 }
 
-impl Error {
-    pub fn codes(&self) -> Vec<Arc<dyn Code>> {
-        match self {
-            Error::ParserError(e) => e.codes().to_vec(),
-            _ => Vec::new()
-        }
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
+        Error::IoError(err)
     }
 }
 
-/// Parse and analyze SQF content to extract item references.
-/// This is the main entry point for the parser.
+impl From<WorkspaceError> for Error {
+    fn from(err: WorkspaceError) -> Self {
+        Error::WorkspaceError(err)
+    }
+}
+
+impl From<SqfError> for Error {
+    fn from(err: SqfError) -> Self {
+        Error::SqfError(err)
+    }
+}
+
+/// Represents a reference to an item found in SQF code
+#[derive(Debug, Clone)]
+pub struct ItemFound {
+    /// The item's class name/ID
+    pub class_name: String,
+    /// The type of item (weapon, magazine, etc)
+    pub kind: ItemKind,
+    /// The context where this item was found (scope/conditions)
+    pub context: String,
+}
+
+/// Parse an SQF file and extract all item references.
 ///
 /// # Arguments
-/// * `content` - The SQF code to parse
+/// * `file_path` - Path to the SQF file to parse
 /// * `workspace` - Optional workspace path for enhanced database configuration
-/// * `file_path` - Optional file path for error reporting and context
 ///
 /// # Returns
-/// * `Result<Vec<ItemContext>, Error>` - List of found items or error
-pub fn parse_sqf_content(
-    content: &str, 
-    workspace: Option<&WorkspacePath>,
-    file_path: Option<&Path>,
-) -> Result<Vec<ItemContext>, Error> {
+/// * `Result<Vec<ItemFound>, Error>` - List of found items or error
+pub fn parse_file(file_path: &Path, workspace: Option<&WorkspacePath>) -> Result<Vec<ItemFound>, Error> {
+    let content = fs::read_to_string(file_path)?;
+    
     // Create database with workspace if available
     let database = if let Some(workspace) = workspace {
         Database::a3_with_workspace(workspace, false)?
@@ -73,20 +84,13 @@ pub fn parse_sqf_content(
     };
 
     // Create processed context with file info
-    let file_path = file_path.map(|p| p.to_path_buf()).unwrap_or_else(|| Path::new("test.sqf").to_path_buf());
-    let workspace_path = if let Some(ws) = workspace {
-        ws.clone()
-    } else {
-        WorkspacePath::slim(&file_path)?
-    };
-
     let processed = Processed::new(
         vec![Output::Direct(Arc::new(Token::new(
             Symbol::Word(content.to_string()),
             Position::new(
                 LineCol(0, (1, 0)),
                 LineCol(content.len(), (1, content.len())),
-                workspace_path,
+                WorkspacePath::slim(&file_path.to_path_buf())?,
             )
         )))],
         HashMap::new(),
@@ -98,21 +102,21 @@ pub fn parse_sqf_content(
     let statements = parse_sqf(&database, &processed)
         .map_err(Error::ParserError)?;
 
-    let result = analyze_sqf(&statements)
+    let result = analyzer::analyze_sqf(&statements)
         .map_err(|e| Error::UnparseableSyntax(e))?;
     
-    Ok(result.items)
+    // Convert internal types to public API types
+    let items = result.items.into_iter()
+        .map(|item| ItemFound {
+            class_name: item.item.item_id,
+            kind: item.item.kind,
+            context: item.scope,
+        })
+        .collect();
+    
+    Ok(items)
 }
 
-/// Convenience function to scan a file for item references
-///
-/// # Arguments
-/// * `path` - Path to the SQF file to scan
-/// * `workspace` - Optional workspace path for enhanced database configuration
-///
-/// # Returns
-/// * `Result<Vec<ItemContext>, Error>` - List of found items or error
-pub fn scan_file(path: &Path, workspace: Option<&WorkspacePath>) -> Result<Vec<ItemContext>, Error> {
-    let content = fs::read_to_string(path)?;
-    parse_sqf_content(&content, workspace, Some(path))
-}
+
+// Re-export analyzer for convenience
+pub use analyzer::analyze_sqf;

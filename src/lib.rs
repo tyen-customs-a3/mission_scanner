@@ -1,3 +1,4 @@
+pub mod models;
 pub mod scanner;
 pub mod utils;
 pub mod types;
@@ -6,10 +7,6 @@ pub mod mission;
 // Re-export main types and functions for easier access
 pub use scanner::{
     MissionScanner,
-    parse_loadout_file,
-    parse_sqm_file,
-    extract_sqm_dependencies,
-    scan_sqf_file,
     extract_mission_dependencies,
 };
 

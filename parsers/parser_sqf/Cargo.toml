@@ -7,10 +7,10 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-hemtt-sqf = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
-hemtt-workspace = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
-hemtt-preprocessor = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
-hemtt-common = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
+hemtt-sqf = { workspace = true }
+hemtt-workspace = { workspace = true }
+hemtt-preprocessor = { workspace = true }
+hemtt-common = { workspace = true }
 codespan-reporting = { version = "0.11.1", features = ["serialization"] }
 thiserror = "2.0.12"
 

@@ -6,6 +6,7 @@ use std::fs;
 
 use super::*;
 use crate::types::{MissionScannerConfig, MissionExtractionResult};
+use crate::scanner::parse_file;
 
 /// Helper function to get the test data directory
 fn get_test_data_dir() -> PathBuf {
@@ -205,9 +206,6 @@ fn test_mission_file_structure() -> Result<()> {
 
 #[test]
 fn test_mission_class_dependencies() -> Result<()> {
-    use crate::scanner::extract_sqm_dependencies;
-    use crate::scanner::parse_loadout_file;
-    
     let test_dir = get_test_data_dir();
     let mission_files = collector::collect_mission_files(&test_dir)?;
     
@@ -216,9 +214,28 @@ fn test_mission_class_dependencies() -> Result<()> {
         .find(|m| m.mission_name == "test_mission_1")
         .expect("test_mission_1 should exist");
     
-    // Test mission.sqm dependencies
-    let sqm_path = mission1.sqm_file.as_ref().unwrap();
-    let dependencies = extract_sqm_dependencies(sqm_path)?;
+    let mut dependencies = Vec::new();
+    
+    // Process SQM file if available
+    if let Some(sqm_path) = &mission1.sqm_file {
+        if let Ok(deps) = parse_file(sqm_path) {
+            dependencies.extend(deps);
+        }
+    }
+    
+    // Process SQF files
+    for sqf_path in &mission1.sqf_files {
+        if let Ok(deps) = parse_file(sqf_path) {
+            dependencies.extend(deps);
+        }
+    }
+    
+    // Process CPP/HPP files
+    for cpp_path in &mission1.cpp_files {
+        if let Ok(deps) = parse_file(cpp_path) {
+            dependencies.extend(deps);
+        }
+    }
 
     // Expected addon dependencies from mission.sqm
     // Expected equipment items from mission.sqm
@@ -355,33 +372,38 @@ fn test_mission_class_dependencies() -> Result<()> {
         "SmokeShellGreen"
     ];
 
+    // Get all class names from dependencies
+    let found_classes: std::collections::HashSet<_> = dependencies.iter()
+        .map(|dep| dep.class_name.as_str())
+        .collect();
+
     // Verify all items from each file are found in dependencies
     let mut missing_items = Vec::new();
 
     // Check mission.sqm items
     for item in &mission_sqm_items {
-        if !dependencies.contains(&item.to_string()) {
+        if !found_classes.contains(*item) {
             missing_items.push(format!("mission.sqm item: {}", item));
         }
     }
 
     // Check enemy loadout items
     for item in &enemy_loadout_items {
-        if !dependencies.contains(&item.to_string()) {
+        if !found_classes.contains(*item) {
             missing_items.push(format!("enemy_loadout.hpp: {}", item));
         }
     }
 
     // Check player loadout items
     for item in &player_loadout_items {
-        if !dependencies.contains(&item.to_string()) {
+        if !found_classes.contains(*item) {
             missing_items.push(format!("player_loadout.hpp: {}", item));
         }
     }
 
     // Check arsenal items
     for item in &arsenal_items {
-        if !dependencies.contains(&item.to_string()) {
+        if !found_classes.contains(*item) {
             missing_items.push(format!("arsenal.sqf: {}", item));
         }
     }
@@ -389,6 +411,16 @@ fn test_mission_class_dependencies() -> Result<()> {
     // If any items are missing, fail the test with details
     assert!(missing_items.is_empty(), 
         "Missing dependencies:\n{}", missing_items.join("\n"));
+
+    // Print some debug info about what we found
+    debug!("Found {} total dependencies:", dependencies.len());
+    let mut by_type: std::collections::HashMap<_, Vec<_>> = std::collections::HashMap::new();
+    for dep in &dependencies {
+        by_type.entry(&dep.reference_type).or_default().push(&dep.class_name);
+    }
+    for (ref_type, classes) in &by_type {
+        debug!("- {:?}: {} items", ref_type, classes.len());
+    }
 
     Ok(())
 } 
