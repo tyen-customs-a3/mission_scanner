@@ -1,19 +1,48 @@
 #[cfg(test)]
 mod integration_tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{PathBuf, Path};
     use parser_sqf::{parse_file, ItemKind};
+    use hemtt_workspace::{Workspace, LayerType, WorkspacePath};
+    use hemtt_common::config::PDriveOption;
+    use log::debug;
+
+    fn init() {
+        let _ = env_logger::builder()
+            .filter_level(log::LevelFilter::Debug)
+            .is_test(true)
+            .try_init();
+    }
 
     #[test]
     fn test_arsenal_file_parsing() {
-        // Read the arsenal.sqf file path
+        init();
+
+        // Get the test file path
         let test_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
             .join("example_data")
             .join("arsenal.sqf");
         
-        // Parse the file using the public interface
-        let result = parse_file(&test_file_path, None).expect("Failed to parse arsenal.sqf");
+        debug!("Test file path: {:?}", test_file_path);
+        assert!(test_file_path.exists(), "Test file does not exist at {:?}", test_file_path);
+        
+        let parent_path = test_file_path.parent().unwrap().to_path_buf();
+        debug!("Parent path: {:?}", parent_path);
+        
+        // Create a test workspace with the parent directory as root
+        let workspace = Workspace::builder()
+            .physical(&parent_path, LayerType::Source)
+            .finish(None, false, &PDriveOption::Disallow)
+            .expect("Failed to create test workspace");
+        
+        // Get the workspace file reference
+        let workspace_file = workspace.join("arsenal.sqf").expect("Failed to create workspace path");
+        debug!("Workspace file path: {:?}", workspace_file.vfs().as_str());
+        
+        // Parse the file using the workspace file
+        let result = parse_file(&test_file_path, Some(&workspace_file))
+            .expect("Failed to parse arsenal.sqf");
 
         // Verify items that should have specific types based on how they're used
         let weapons = vec![

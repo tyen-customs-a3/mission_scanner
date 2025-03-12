@@ -90,7 +90,7 @@ pub fn parse_file(file_path: &Path, workspace: Option<&WorkspacePath>) -> Result
             Position::new(
                 LineCol(0, (1, 0)),
                 LineCol(content.len(), (1, content.len())),
-                WorkspacePath::slim(&file_path.to_path_buf())?,
+                workspace.cloned().unwrap_or_else(|| WorkspacePath::slim(&file_path.to_path_buf()).unwrap()),
             )
         )))],
         HashMap::new(),
