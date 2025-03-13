@@ -35,6 +35,23 @@ pub struct HppParser {
     config: Config,
 }
 
+/// Parse an HPP file and return a vector of classes.
+/// 
+/// # Arguments
+/// 
+/// * `file_path` - Path to the HPP file to parse
+/// 
+/// # Returns
+/// 
+/// * `Result<Vec<HppClass>, Codes>` - List of classes found in the file or error
+pub fn parse_file(file_path: &std::path::Path) -> Result<Vec<HppClass>, Codes> {
+    let content = std::fs::read_to_string(file_path)
+        .map_err(|_| vec![])?;
+    
+    let parser = HppParser::new(&content)?;
+    Ok(parser.parse_classes())
+}
+
 impl HppParser {
     pub fn new(content: &str) -> Result<Self, Codes> {
         // Create a temporary workspace with the content
