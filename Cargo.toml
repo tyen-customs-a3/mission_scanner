@@ -3,7 +3,8 @@ members = [
     ".",
     "parsers/parser_code",
     "parsers/parser_sqf",
-    "parsers/parser_sqm"
+    "parsers/parser_sqm",
+    "parsers/parser_hpp"
 ]
 
 [workspace.dependencies]
@@ -19,9 +20,9 @@ edition = "2024"
 
 [dependencies]
 pbo_tools = { path = "../pbo_tools" }
-parser_code = { path = "parsers/parser_code" }
 parser_sqf = { path = "parsers/parser_sqf" }
 parser_sqm = { path = "parsers/parser_sqm" }
+parser_hpp = { path = "parsers/parser_hpp" }
 hemtt-sqf = { workspace = true }
 hemtt-workspace = { workspace = true }
 hemtt-preprocessor = { workspace = true }
