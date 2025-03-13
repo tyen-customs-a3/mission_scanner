@@ -8,10 +8,11 @@ members = [
 ]
 
 [workspace.dependencies]
-hemtt-sqf = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
-hemtt-workspace = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
-hemtt-preprocessor = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
-hemtt-common = { git = "https://github.com/BrettMayson/HEMTT", rev = "0bdf5e7" }
+hemtt-sqf = { path = "../hemtt/libs/sqf" }
+hemtt-workspace = { path = "../hemtt/libs/workspace" }
+hemtt-preprocessor = { path = "../hemtt/libs/preprocessor" }
+hemtt-common = { path = "../hemtt/libs/common" }
+hemtt-config = { path = "../hemtt/libs/config" }
 
 [package]
 name = "mission_scanner"
@@ -27,6 +28,7 @@ hemtt-sqf = { workspace = true }
 hemtt-workspace = { workspace = true }
 hemtt-preprocessor = { workspace = true }
 hemtt-common = { workspace = true }
+hemtt-config = { workspace = true }
 clap = { version = "4.5.32", features = ["derive"] }
 tokio = { version = "1.44.0", features = ["full"] }
 futures = "0.3.31"
