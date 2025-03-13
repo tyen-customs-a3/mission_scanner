@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 use anyhow::{Result, anyhow};
-use log::{info, warn, debug};
 use walkdir::WalkDir;
 
 use crate::types::{MissionExtractionResult, MissionScannerConfig};

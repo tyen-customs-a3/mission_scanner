@@ -1,14 +1,10 @@
 use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
-use log::{info, warn, error, debug};
+use log::{info, warn, debug};
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
-use tokio::task;
-use futures::future::join_all;
-use walkdir::WalkDir;
 
 use crate::types::{MissionExtractionResult, MissionScannerConfig};
 use super::collector;
-use crate::utils::{find_file_by_extension, find_files_by_extension};
 
 /// Scan mission files with configuration
 pub async fn scan_with_config(

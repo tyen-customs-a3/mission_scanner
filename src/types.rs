@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::collections::HashSet;
 use serde::{Serialize, Deserialize};
 
 /// Result of extracting mission files

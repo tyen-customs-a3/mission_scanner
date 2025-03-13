@@ -23,10 +23,9 @@ pub use types::{
 
 pub use mission::{MissionScanConfig, scan_missions};
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use anyhow::{Result, anyhow};
-use log::{info, warn, error};
-use std::fs;
+use log::{info, warn};
 
 /// Process all mission files in a directory
 /// 

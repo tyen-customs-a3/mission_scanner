@@ -2,12 +2,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::debug;
-use std::fs;
-use hemtt_workspace::WorkspacePath;
 
 use super::*;
 use crate::types::{MissionScannerConfig, MissionExtractionResult, ReferenceType};
-use crate::scanner::parse_file;
 
 use env_logger;
 

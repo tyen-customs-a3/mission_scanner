@@ -5,13 +5,11 @@ mod collector;
 mod scanner;
 mod parser_integration;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use anyhow::Result;
-use log::{info, warn, error, debug};
-use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
-use hemtt_workspace::WorkspacePath;
+use log::{warn, debug};
 
-use crate::types::{MissionExtractionResult, MissionScannerConfig, ClassDependency, MissionDependencyResult};
+use crate::types::{MissionExtractionResult, MissionScannerConfig, MissionDependencyResult};
 
 // Re-export parsing functions for easier access
 pub use parser_integration::parse_file;

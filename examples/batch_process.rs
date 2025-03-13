@@ -1,8 +1,7 @@
 use std::path::Path;
 use anyhow::Result;
-use log::{info, warn, error};
+use log::info;
 use env_logger::Env;
-use indicatif::{ProgressBar, ProgressStyle};
 use mission_scanner::types::MissionScannerConfig;
 
 // This example demonstrates how to batch process a directory of mission files

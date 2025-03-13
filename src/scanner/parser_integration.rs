@@ -1,8 +1,7 @@
 use std::path::Path;
 use std::fs;
 use anyhow::{Result, anyhow};
-use log::{info, debug, warn, error};
-use hemtt_workspace::WorkspacePath;
+use log::{debug, warn};
 
 use parser_hpp::{parse_file as parser_hpp_file, HppValue};
 use parser_sqm::{parse_sqm as parse_sqm_file, extract_class_dependencies};

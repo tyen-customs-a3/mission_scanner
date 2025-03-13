@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use anyhow::Result;
-use log::{info, warn, error, debug};
 use walkdir::WalkDir;
 
 /// Find a file with a specific extension
