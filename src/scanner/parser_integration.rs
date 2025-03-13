@@ -133,7 +133,7 @@ pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassDependency>> {
     }
     
     // Then parse inventory classes
-    match parse_sqm(&content) {
+    match parse_sqm_file(&content) {
         Ok((_, inventory_classes)) => {
             debug!("Successfully parsed {} inventory classes from SQM", inventory_classes.len());
             for ic in &inventory_classes {
