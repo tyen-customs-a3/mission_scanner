@@ -233,7 +233,32 @@ impl Analyzer {
         }
     }
 
+    fn is_diary_context(&self, expr: &Expression) -> bool {
+        match expr {
+            Expression::Array(elements, _) => {
+                // Check if this is a diary entry array: ["diary", ["Title", "Content"]]
+                if elements.len() == 2 {
+                    if let Expression::String(first, _, _) = &elements[0] {
+                        return first.to_string() == "diary";
+                    }
+                }
+            }
+            Expression::BinaryCommand(cmd, _, _, _) => {
+                if let BinaryCommand::Named(name) = cmd {
+                    return name == "createDiaryRecord";
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     fn collect_from_expression(&mut self, expr: &Expression) {
+        // Skip diary entries
+        if self.is_diary_context(expr) {
+            return;
+        }
+
         match expr {
             Expression::Array(elements, _) => {
                 // Only process arrays in specific contexts
@@ -248,146 +273,38 @@ impl Analyzer {
                             Expression::Array(nested_elements, _) => {
                                 // Process nested arrays
                                 for nested in nested_elements {
-                                    if let Expression::String(s, _, _) = nested {
-                                        let kind = self.infer_item_kind(s, &self.current_scope);
-                                        self.collected.pending_items.push((s.to_string(), kind));
-                                    }
+                                    self.collect_from_expression(nested);
                                 }
                             }
-                            Expression::Variable(var, _) => {
-                                if let Some(var_type) = self.collected.variables.get(var) {
-                                    match var_type {
-                                        VariableType::Item(kind) => {
-                                            self.collected.pending_items.push((var.to_string(), kind.clone()));
-                                        }
-                                        VariableType::Array(types) => {
-                                            // Process array items
-                                            for item_type in types {
-                                                if let VariableType::Item(kind) = item_type {
-                                                    self.collected.pending_items.push((var.to_string(), kind.clone()));
-                                                }
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            _ => {}
+                            _ => self.collect_from_expression(element),
                         }
                     }
                 }
             }
             Expression::BinaryCommand(cmd, lhs, rhs, _) => {
                 if let BinaryCommand::Named(name) = cmd {
-                    match name.to_string().to_lowercase().as_str() {
-                        "then" | "else" => {
-                            // Process both branches for conditionals
-                            self.collect_from_expression(lhs);
-                            self.collect_from_expression(rhs);
-                        }
-                        "select" => {
-                            // For select operations, process the array
-                            if let Expression::Variable(var, _) = &**lhs {
-                                if let Some(VariableType::Array(types)) = self.collected.variables.get(var) {
-                                    // Process all items in the array, not just the selected one
-                                    for item_type in types {
-                                        if let VariableType::Item(kind) = item_type {
-                                            self.collected.pending_items.push((var.to_string(), kind.clone()));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        "call" => {
-                            // Handle function calls
-                            // In SQF, the call syntax is: [args] call functionName
-                            // So the left side is the arguments array and the right side is the function name
-                            if let Expression::Array(args, _) = &**lhs {
-                                // Extract function name from either String or Variable expression
-                                let func_name_lower = match &**rhs {
-                                    Expression::String(func_name, _, _) => {
-                                        func_name.to_lowercase()
-                                    },
-                                    Expression::Variable(func_name, _) => {
-                                        func_name.to_lowercase()
-                                    },
-                                    _ => {
-                                        return;
-                                    }
-                                };
-                                
-                                // Handle item loading functions
-                                if func_name_lower.contains("loaditem") {
-                                    // Extract the item from the first element of the args array
-                                    if !args.is_empty() {
-                                        if let Expression::String(item_id, _, _) = &args[0] {
-                                            // For cargo functions, always use ItemKind::Item
-                                            self.collected.pending_items.push((item_id.to_string(), ItemKind::Item));
-                                        }
-                                    }
-                                } 
-                                // Handle arsenal initialization
-                                else if func_name_lower.contains("arsenal") && func_name_lower.contains("init") {
-                                    // For arsenal init, the items are usually in the first arg (sometimes second)
-                                    if !args.is_empty() {
-                                        // Check if we have an array or variable
-                                        match &args[0] {
-                                            Expression::Array(elements, _) => {
-                                                for element in elements {
-                                                    self.process_arsenal_item(element);
-                                                }
-                                            },
-                                            Expression::Variable(var, _) => {
-                                                // When we have a variable, just add the string items
-                                                // from the initial variable assignment, don't try to
-                                                // track variable modifications like pushBackUnique
-                                                if self.collected.variables.contains_key(var) {
-                                                    // We already tracked this variable's items when it was assigned
-                                                    // Just find the strings in its initial assignment
-                                                    if var == "_itemEquipment" {
-                                                        // This is for the specific test case
-                                                        self.collected.pending_items.push(("uniform1".to_string(), ItemKind::Item));
-                                                    }
-                                                }
-                                            },
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        _ => {
-                            if let Some(items) = self.analyze_command(cmd, lhs, rhs) {
-                                self.collected.pending_items.extend(items);
-                            }
-                        }
+                    // Skip diary record creation
+                    if name == "createDiaryRecord" {
+                        return;
+                    }
+                    
+                    // Process other binary commands
+                    let args = vec![lhs.as_ref().clone(), rhs.as_ref().clone()];
+                    if self.handle_function_call(name, &args) {
+                        return;
                     }
                 }
-            }
-            Expression::Code(code) => {
-                for stmt in code.content() {
-                    self.process_statement(stmt);
-                }
+                self.collect_from_expression(lhs);
+                self.collect_from_expression(rhs);
             }
             Expression::UnaryCommand(cmd, operand, _) => {
-                // Handle unary commands
                 if let UnaryCommand::Named(name) = cmd {
-                    match name.to_string().to_lowercase().as_str() {
-                        "select" => {
-                            // Process array selections
-                            if let Expression::Variable(var, _) = &**operand {
-                                if let Some(VariableType::Array(types)) = self.collected.variables.get(var) {
-                                    for item_type in types {
-                                        if let VariableType::Item(kind) = item_type {
-                                            self.collected.pending_items.push((var.to_string(), kind.clone()));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
+                    let args = vec![operand.as_ref().clone()];
+                    if self.handle_function_call(name, &args) {
+                        return;
                     }
                 }
+                self.collect_from_expression(operand);
             }
             _ => {}
         }

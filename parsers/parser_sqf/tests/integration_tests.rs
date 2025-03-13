@@ -27,21 +27,8 @@ mod integration_tests {
         debug!("Test file path: {:?}", test_file_path);
         assert!(test_file_path.exists(), "Test file does not exist at {:?}", test_file_path);
         
-        let parent_path = test_file_path.parent().unwrap().to_path_buf();
-        debug!("Parent path: {:?}", parent_path);
-        
-        // Create a test workspace with the parent directory as root
-        let workspace = Workspace::builder()
-            .physical(&parent_path, LayerType::Source)
-            .finish(None, false, &PDriveOption::Disallow)
-            .expect("Failed to create test workspace");
-        
-        // Get the workspace file reference
-        let workspace_file = workspace.join("arsenal.sqf").expect("Failed to create workspace path");
-        debug!("Workspace file path: {:?}", workspace_file.vfs().as_str());
-        
         // Parse the file using the workspace file
-        let result = parse_file(&test_file_path, Some(&workspace_file))
+        let result = parse_file(&test_file_path)
             .expect("Failed to parse arsenal.sqf");
 
         // Verify items that should have specific types based on how they're used
