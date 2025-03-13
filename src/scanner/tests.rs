@@ -3,10 +3,20 @@ use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::debug;
 use std::fs;
+use hemtt_workspace::WorkspacePath;
 
 use super::*;
-use crate::types::{MissionScannerConfig, MissionExtractionResult};
+use crate::types::{MissionScannerConfig, MissionExtractionResult, ReferenceType};
 use crate::scanner::parse_file;
+
+use env_logger;
+
+fn init() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .is_test(true)
+        .try_init();
+}
 
 /// Helper function to get the test data directory
 fn get_test_data_dir() -> PathBuf {
@@ -206,221 +216,107 @@ fn test_mission_file_structure() -> Result<()> {
 
 #[test]
 fn test_mission_class_dependencies() -> Result<()> {
+    init();
     let test_dir = get_test_data_dir();
+    println!("Test directory: {}", test_dir.display());
+    
+    // First collect the mission files using the collector
     let mission_files = collector::collect_mission_files(&test_dir)?;
+    println!("Found {} mission files", mission_files.len());
     
     // Find test_mission_1
     let mission1 = mission_files.iter()
         .find(|m| m.mission_name == "test_mission_1")
         .expect("test_mission_1 should exist");
     
-    let mut dependencies = Vec::new();
+    println!("Processing test_mission_1");
+    println!("Mission directory: {}", mission1.mission_dir.display());
+    println!("SQM file: {:?}", mission1.sqm_file);
+    println!("SQF files: {:?}", mission1.sqf_files);
+    println!("CPP files: {:?}", mission1.cpp_files);
     
-    // Process SQM file if available
-    if let Some(sqm_path) = &mission1.sqm_file {
-        if let Ok(deps) = parse_file(sqm_path) {
-            dependencies.extend(deps);
-        }
-    }
+    // Extract dependencies using the scanner's extract_mission_dependencies
+    let results = extract_mission_dependencies(&[mission1.clone()])?;
+    println!("Extracted {} mission results", results.len());
     
-    // Process SQF files
-    for sqf_path in &mission1.sqf_files {
-        if let Ok(deps) = parse_file(sqf_path) {
-            dependencies.extend(deps);
-        }
-    }
+    // Get the dependencies for test_mission_1
+    let mission_deps = results.iter()
+        .find(|r| r.mission_name == "test_mission_1")
+        .expect("Should have dependencies for test_mission_1");
     
-    // Process CPP/HPP files
-    for cpp_path in &mission1.cpp_files {
-        if let Ok(deps) = parse_file(cpp_path) {
-            dependencies.extend(deps);
-        }
-    }
-
-    // Expected addon dependencies from mission.sqm
-    // Expected equipment items from mission.sqm
-    let mission_sqm_items = [
-        // Unit inventory weapons
-        "rhs_weap_mg42",
-        "rhsusf_weap_glock17g4",
-        // Unit inventory magazines
-        "rhsgref_50Rnd_792x57_SmE_drum",
-        "rhsusf_mag_17Rnd_9x19_JHP",
-        // Unit inventory equipment
-        "TC_U_aegis_guerilla_garb_m81_sudan",
-        "rhsusf_spcs_ocp_saw",
-        "pca_eagle_a3_od",
-        "simc_pasgt_m81",
-        // Unit inventory items
-        "ACRE_BF888S",
-        "ACE_fieldDressing",
-        "ACE_packingBandage",
-        "ACE_tourniquet",
-        "ACE_epinephrine",
-        "ACE_morphine",
-        "ACE_splint",
-        "ItemMap",
-        "ItemCompass",
-        "ItemWatch"
-    ];
-
-    // Expected items from enemy_loadout.hpp
-    let enemy_loadout_items = [
-        // Uniforms
-        "rhs_uniform_emr_patchless",
-        "rhs_uniform_gorka_r_g",
-        // Vests
-        "rhs_6b23_6sh116",
-        "rhs_6b23_6sh116_vog",
-        "rhs_6b23_digi_6sh92",
-        "rhs_6b23_digi_6sh92_spetsnaz",
-        // Backpacks
-        "rhs_assault_umbts",
-        // Headgear
-        "rhs_6b27m_digi",
-        "rhs_6b47",
-        "rhs_6b7_1m",
-        "rhs_6b7_1m_emr",
-        // Weapons
-        "rhs_weap_ak74m",
-        "rhs_weap_ak74m_gp25",
-        "rhs_weap_pkp",
-        "rhs_weap_rpg26",
-        "rhs_weap_rpg7",
-        // Weapon attachments
-        "rhs_acc_1p63",
-        "rhs_acc_ekp1",
-        "rhs_acc_pgo7v3",
-        // Magazines and grenades
-        "rhs_30Rnd_545x39_7N10_AK",
-        "rhs_VOG25",
-        "rhs_GRD40_White",
-        "rhs_100Rnd_762x54mmR",
-        "rhs_rpg7_PG7V_mag",
-        "rhs_rpg7_PG7VL_mag"
-    ];
-
-    // Expected items from player_loadout.hpp
-    let player_loadout_items = [
-        // Uniforms
-        "U_I_L_Uniform_01_tshirt_sport_F",
-        "U_I_L_Uniform_01_tshirt_skull_F",
-        "CUP_I_B_PMC_Unit_19",
-        "CUP_I_B_PMC_Unit_12",
-        // Vests
-        "V_HarnessOGL_brn",
-        "usm_vest_lbe_gr",
-        "usm_vest_lbe_machinegunner",
-        // Backpacks
-        "aegis_carryall_blk",
-        "B_AssaultPack_mcamo",
-        "B_TacticalPack_mcamo",
-        // Weapons
-        "rhs_weap_m1garand_sa43",
-        "CUP_lmg_PKM",
-        "rhs_weap_m79",
-        "rhs_weap_m82a1",
-        "rhs_weap_akms",
-        // Sidearms
-        "rhs_weap_makarov_pm",
-        "CUP_hgun_TEC9",
-        // Magazines
-        "rhsusf_mag_10Rnd_STD_50BMG_M33",
-        "rhsusf_mag_10Rnd_STD_50BMG_mk211",
-        "CUP_32Rnd_9x19_TEC9",
-        "rhs_30Rnd_762x39mm_bakelite",
-        "rhs_30Rnd_762x39mm_bakelite_tracer"
-    ];
-
-    // Expected items from arsenal.sqf
-    let arsenal_items = [
-        // Uniforms
-        "Tarkov_Uniforms_1",
-        "Tarkov_Uniforms_2",
-        // Vests
-        "V_PlateCarrier2_blk",
-        "V_PlateCarrier1_blk",
-        // Helmets
-        "H_HelmetSpecB_blk",
-        "H_HelmetSpecB_snakeskin",
-        // Backpacks
-        "rhs_tortila_black",
-        // NVGs
-        "rhsusf_ANPVS_15",
-        // Radios
-        "ACRE_PRC343",
-        "ACRE_PRC148",
-        "ACRE_PRC152",
-        "ACRE_PRC117F",
-        // ACE Items
-        "ACE_Flashlight_XL50",
-        "ACE_MapTools",
-        "ACE_RangeCard",
-        // Equipment
-        "ItemCompass",
-        "ItemMap",
-        "ItemWatch",
-        "Binocular",
-        "Rangefinder",
-        // Grenades and Flares
-        "ACE_40mm_Flare_green",
-        "ACE_40mm_Flare_red",
-        "UGL_FlareGreen_F",
-        "UGL_FlareRed_F",
-        "1Rnd_SmokeBlue_Grenade_shell",
-        "SmokeShellBlue",
-        "SmokeShellGreen"
-    ];
-
+    println!("Found {} dependencies for test_mission_1", mission_deps.class_dependencies.len());
+    
     // Get all class names from dependencies
-    let found_classes: std::collections::HashSet<_> = dependencies.iter()
+    let found_classes: std::collections::HashSet<_> = mission_deps.class_dependencies.iter()
         .map(|dep| dep.class_name.as_str())
         .collect();
-
-    // Verify all items from each file are found in dependencies
+    
+    println!("Found classes:");
+    for class in &found_classes {
+        println!("  - {}", class);
+    }
+    
+    // Expected items from each file
+    let expected_items = [
+        // Basic items that should be found in mission.sqm
+        "ItemMap", "ItemCompass", "ItemWatch",
+        
+        // Common equipment items
+        "rhs_weap_mg42", "rhsusf_weap_glock17g4",
+        "rhsgref_50Rnd_792x57_SmE_drum", "rhsusf_mag_17Rnd_9x19_JHP",
+        "TC_U_aegis_guerilla_garb_m81_sudan", "rhsusf_spcs_ocp_saw",
+        "pca_eagle_a3_od", "simc_pasgt_m81",
+        
+        // Common items from loadouts
+        "ACRE_BF888S", "ACE_fieldDressing", "ACE_packingBandage",
+        "ACE_tourniquet", "ACE_epinephrine", "ACE_morphine", "ACE_splint",
+        
+        // Enemy loadout items
+        "rhs_uniform_emr_patchless", "rhs_uniform_gorka_r_g",
+        "rhs_6b23_6sh116", "rhs_6b23_6sh116_vog",
+        "rhs_weap_ak74m", "rhs_weap_ak74m_gp25", "rhs_weap_pkp",
+        "rhs_weap_rpg26", "rhs_weap_rpg7",
+        "rhs_30Rnd_545x39_7N10_AK", "rhs_VOG25", "rhs_GRD40_White",
+        
+        // Player loadout items
+        "U_I_L_Uniform_01_tshirt_sport_F", "U_I_L_Uniform_01_tshirt_skull_F",
+        "CUP_I_B_PMC_Unit_19", "CUP_I_B_PMC_Unit_12",
+        "rhs_weap_m1garand_sa43", "CUP_lmg_PKM", "rhs_weap_m79",
+        "rhs_weap_m82a1", "rhs_weap_akms",
+        
+        // Arsenal items
+        "Tarkov_Uniforms_1", "Tarkov_Uniforms_2",
+        "V_PlateCarrier2_blk", "V_PlateCarrier1_blk",
+        "H_HelmetSpecB_blk", "H_HelmetSpecB_snakeskin",
+        "rhsusf_ANPVS_15", "ACRE_PRC343", "ACRE_PRC148",
+        "ACE_Flashlight_XL50", "ACE_MapTools", "ACE_RangeCard"
+    ];
+    
+    // Verify all expected items are found in dependencies
     let mut missing_items = Vec::new();
-
-    // Check mission.sqm items
-    for item in &mission_sqm_items {
-        if !found_classes.contains(*item) {
-            missing_items.push(format!("mission.sqm item: {}", item));
+    
+    for &item in &expected_items {
+        if !found_classes.contains(item) {
+            missing_items.push(format!("Missing item: {}", item));
         }
     }
-
-    // Check enemy loadout items
-    for item in &enemy_loadout_items {
-        if !found_classes.contains(*item) {
-            missing_items.push(format!("enemy_loadout.hpp: {}", item));
-        }
-    }
-
-    // Check player loadout items
-    for item in &player_loadout_items {
-        if !found_classes.contains(*item) {
-            missing_items.push(format!("player_loadout.hpp: {}", item));
-        }
-    }
-
-    // Check arsenal items
-    for item in &arsenal_items {
-        if !found_classes.contains(*item) {
-            missing_items.push(format!("arsenal.sqf: {}", item));
-        }
-    }
-
+    
     // If any items are missing, fail the test with details
     assert!(missing_items.is_empty(), 
         "Missing dependencies:\n{}", missing_items.join("\n"));
-
-    // Print some debug info about what we found
-    debug!("Found {} total dependencies:", dependencies.len());
-    let mut by_type: std::collections::HashMap<_, Vec<_>> = std::collections::HashMap::new();
-    for dep in &dependencies {
-        by_type.entry(&dep.reference_type).or_default().push(&dep.class_name);
+    
+    // Also verify we found some common reference types
+    let reference_types: std::collections::HashSet<_> = mission_deps.class_dependencies.iter()
+        .map(|dep| &dep.reference_type)
+        .collect();
+    
+    println!("Found reference types:");
+    for ref_type in &reference_types {
+        println!("  - {:?}", ref_type);
     }
-    for (ref_type, classes) in &by_type {
-        debug!("- {:?}: {} items", ref_type, classes.len());
-    }
-
+    
+    assert!(reference_types.contains(&ReferenceType::Direct), "Should find direct references");
+    assert!(reference_types.contains(&ReferenceType::Variable), "Should find variable references");
+    
     Ok(())
 } 

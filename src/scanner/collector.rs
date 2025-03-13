@@ -1,112 +1,112 @@
 use std::path::{Path, PathBuf};
-use anyhow::Result;
+use std::collections::HashSet;
+use anyhow::{Result, anyhow};
 use log::{info, warn, debug};
 use walkdir::WalkDir;
 
 use crate::types::{MissionExtractionResult, MissionScannerConfig};
 
-/// Process a mission directory and collect its files
-fn process_mission_directory(mission_dir: &Path, sqm_path: PathBuf) -> MissionExtractionResult {
-    debug!("Processing mission directory: {}", mission_dir.display());
-    
-    // Get mission name from directory
-    let mission_name = mission_dir.file_name()
-        .map_or("unknown".to_string(), |name| name.to_string_lossy().to_string());
-    
-    // Find all relevant files
+/// Check if a path is a mission directory
+fn is_mission_directory(path: &Path) -> bool {
+    path.is_dir() && path.join("mission.sqm").exists()
+}
+
+/// Find mission.sqm in a directory
+fn find_mission_sqm(dir: &Path) -> Result<Option<PathBuf>> {
+    let sqm_path = dir.join("mission.sqm");
+    if sqm_path.exists() {
+        Ok(Some(sqm_path))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Find all SQF files in a directory
+fn find_sqf_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut sqf_files = Vec::new();
-    let mut cpp_files = Vec::new();
-    
-    for file_entry in WalkDir::new(mission_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file()) {
-        
-        let file_path = file_entry.path().to_owned();
-        
-        // Special case for description.ext
-        if file_path.file_name().map_or(false, |name| name == "description.ext") {
-            debug!("Found description.ext: {}", file_path.display());
-            cpp_files.push(file_path);
-            continue;
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "sqf") {
+            sqf_files.push(path.to_path_buf());
         }
-        
-        // Process other files by extension
-        if let Some(ext) = file_path.extension() {
-            match ext.to_string_lossy().as_ref() {
-                "sqf" => {
-                    debug!("Found SQF file: {}", file_path.display());
-                    sqf_files.push(file_path);
-                },
-                "cpp" | "hpp" => {
-                    debug!("Found CPP/HPP file: {}", file_path.display());
-                    cpp_files.push(file_path);
-                },
-                _ => {}
+    }
+    Ok(sqf_files)
+}
+
+/// Find all CPP/HPP files in a directory
+fn find_cpp_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut cpp_files = Vec::new();
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                let ext = ext.to_string_lossy().to_lowercase();
+                if ext == "cpp" || ext == "hpp" || ext == "ext" {
+                    cpp_files.push(path.to_path_buf());
+                }
             }
         }
     }
-    
-    debug!("Mission directory summary:");
-    debug!("  Name: {}", mission_name);
-    debug!("  SQM file: {}", sqm_path.display());
-    debug!("  SQF files: {}", sqf_files.len());
-    debug!("  CPP files: {}", cpp_files.len());
-    
-    MissionExtractionResult {
-        mission_name,
-        pbo_path: mission_dir.to_path_buf(),
-        mission_dir: mission_dir.to_path_buf(),
-        sqm_file: Some(sqm_path),
-        sqf_files,
-        cpp_files,
-    }
+    Ok(cpp_files)
 }
 
 /// Collect mission files from a directory
-pub fn collect_mission_files(input_dir: &Path) -> Result<Vec<MissionExtractionResult>> {
-    // Use default config with recursion enabled
-    let config = MissionScannerConfig {
-        recursive: true,
-        ..Default::default()
-    };
-    
-    collect_mission_files_with_config(input_dir, &config)
+pub fn collect_mission_files(dir: &Path) -> Result<Vec<MissionExtractionResult>> {
+    collect_mission_files_with_config(dir, &MissionScannerConfig::default())
 }
 
-/// Collect mission files from a directory with configuration options
-pub fn collect_mission_files_with_config(input_dir: &Path, config: &MissionScannerConfig) -> Result<Vec<MissionExtractionResult>> {
-    info!("Collecting mission files from {} with config", input_dir.display());
-    debug!("Configuration: {:?}", config);
+/// Collect mission files from a directory with configuration
+pub fn collect_mission_files_with_config(dir: &Path, config: &MissionScannerConfig) -> Result<Vec<MissionExtractionResult>> {
+    let mut results = Vec::new();
     
-    let mut mission_results = Vec::new();
-    
-    // Configure the walker based on recursion setting
+    // Walk the directory recursively if configured
     let walker = if config.recursive {
-        WalkDir::new(input_dir)
+        WalkDir::new(dir)
     } else {
-        WalkDir::new(input_dir).max_depth(1)
+        WalkDir::new(dir).max_depth(1)
     };
     
-    // Walk through the directory and find mission.sqm files
+    // Track unique mission names to avoid duplicates
+    let mut seen_missions = HashSet::new();
+    
     for entry in walker.into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
         
-        // Check if the file is a mission.sqm file
-        if path.is_file() && path.file_name().map_or(false, |name| name == "mission.sqm") {
-            debug!("Found mission.sqm: {}", path.display());
-            
-            // The parent directory is the mission directory
-            if let Some(mission_dir) = path.parent() {
-                let result = process_mission_directory(mission_dir, path.to_path_buf());
-                mission_results.push(result);
-            } else {
-                warn!("Found mission.sqm without parent directory: {}", path.display());
-            }
+        // Skip non-mission directories
+        if !is_mission_directory(path) {
+            continue;
         }
+        
+        // Get mission name from directory name
+        let mission_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("Invalid mission directory name"))?
+            .to_string();
+        
+        // Skip if we've seen this mission name before
+        if !seen_missions.insert(mission_name.clone()) {
+            continue;
+        }
+        
+        // Find mission.sqm
+        let sqm_file = find_mission_sqm(path)?;
+        
+        // Find SQF files
+        let sqf_files = find_sqf_files(path)?;
+        
+        // Find CPP/HPP files
+        let cpp_files = find_cpp_files(path)?;
+        
+        results.push(MissionExtractionResult {
+            mission_name,
+            mission_dir: path.to_path_buf(),
+            sqm_file,
+            sqf_files,
+            cpp_files,
+            pbo_path: None, // No PBO path for directory scans
+            class_dependencies: Vec::new(), // Initialize empty dependencies
+        });
     }
     
-    info!("Found {} mission directories", mission_results.len());
-    
-    Ok(mission_results)
+    Ok(results)
 } 

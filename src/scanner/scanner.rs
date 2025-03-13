@@ -54,12 +54,15 @@ pub async fn scan_with_config(
     
     // Log each mission file found
     for mission in &mission_files {
-        debug!("Found mission: {} at {}", mission.mission_name, mission.pbo_path.display());
         if let Some(sqm) = &mission.sqm_file {
             debug!("  SQM file: {}", sqm.display());
         }
         debug!("  SQF files: {}", mission.sqf_files.len());
         debug!("  CPP files: {}", mission.cpp_files.len());
+        debug!("Processing mission.sqm: {}", match &mission.sqm_file {
+            Some(path) => path.display().to_string(),
+            None => "None".to_string()
+        });
     }
     
     scan_progress.finish_with_message(format!("Scanned {} missions", mission_files.len()));

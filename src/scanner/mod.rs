@@ -7,10 +7,11 @@ mod parser_integration;
 
 use std::path::{Path, PathBuf};
 use anyhow::Result;
-use log::{info, warn, error};
+use log::{info, warn, error, debug};
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+use hemtt_workspace::WorkspacePath;
 
-use crate::types::{MissionExtractionResult, MissionScannerConfig};
+use crate::types::{MissionExtractionResult, MissionScannerConfig, ClassDependency, MissionDependencyResult};
 
 // Re-export parsing functions for easier access
 pub use parser_integration::parse_file;
@@ -66,42 +67,85 @@ impl<'a> MissionScanner<'a> {
     }
 }
 
-/// Extract dependency information from missions
+/// Convert MissionExtractionResult to MissionDependencyResult
+fn convert_to_dependency_result(result: MissionExtractionResult) -> MissionDependencyResult {
+    MissionDependencyResult {
+        mission_name: result.mission_name,
+        mission_path: result.mission_dir,
+        class_dependencies: result.class_dependencies,
+    }
+}
+
+/// Extract class dependencies from mission files with a provided workspace path
+///
+/// # Arguments
+/// * `missions` - List of missions to process
+/// * `workspace` - Workspace path for enhanced parsing configuration
+///
+/// # Returns
+/// * `Result<Vec<MissionDependencyResult>>` - List of results with dependencies
 pub fn extract_mission_dependencies(
     missions: &[MissionExtractionResult],
-) -> Result<Vec<crate::types::MissionDependencyResult>> {
+) -> Result<Vec<MissionDependencyResult>> {
     let mut results = Vec::new();
     
     for mission in missions {
+        debug!("Processing mission: {}", mission.mission_name);
         let mut dependencies = Vec::new();
         
-        // Process SQM file if available
-        if let Some(sqm_path) = &mission.sqm_file {
-            if let Ok(deps) = parse_file(sqm_path) {
-                dependencies.extend(deps);
+        // Process mission.sqm if present
+        if let Some(sqm_file) = &mission.sqm_file {
+            debug!("Processing mission.sqm: {}", sqm_file.display());
+            match parser_integration::parse_file(sqm_file) {
+                Ok(mut deps) => {
+                    debug!("Found {} dependencies in SQM file", deps.len());
+                    dependencies.append(&mut deps);
+                },
+                Err(e) => warn!("Failed to parse SQM file {}: {}", sqm_file.display(), e),
             }
         }
         
         // Process SQF files
-        for sqf_path in &mission.sqf_files {
-            if let Ok(deps) = parse_file(sqf_path) {
-                dependencies.extend(deps);
+        debug!("Processing {} SQF files", mission.sqf_files.len());
+        for file in &mission.sqf_files {
+            debug!("Processing SQF file: {}", file.display());
+            match parser_integration::parse_file(file) {
+                Ok(mut deps) => dependencies.append(&mut deps),
+                Err(e) => warn!("Failed to parse SQF file {}: {}", file.display(), e),
             }
         }
         
         // Process CPP/HPP files
-        for cpp_path in &mission.cpp_files {
-            if let Ok(deps) = parse_file(cpp_path) {
-                dependencies.extend(deps);
+        debug!("Processing {} CPP/HPP files", mission.cpp_files.len());
+        for file in &mission.cpp_files {
+            debug!("Processing CPP/HPP file: {}", file.display());
+            match parser_integration::parse_file(file) {
+                Ok(mut deps) => dependencies.append(&mut deps),
+                Err(e) => warn!("Failed to parse CPP/HPP file {}: {}", file.display(), e),
             }
         }
         
-        results.push(crate::types::MissionDependencyResult {
+        debug!("Total of {} dependencies found for mission {}", 
+            dependencies.len(), mission.mission_name);
+        
+        // Log unique class names found
+        let unique_classes: std::collections::HashSet<_> = dependencies.iter()
+            .map(|d| d.class_name.as_str())
+            .collect();
+        
+        debug!("Unique class names found in {}:", mission.mission_name);
+        for class in &unique_classes {
+            debug!("  - {}", class);
+        }
+        
+        // Convert to MissionDependencyResult
+        results.push(MissionDependencyResult {
             mission_name: mission.mission_name.clone(),
-            mission_path: mission.pbo_path.clone(),
+            mission_path: mission.mission_dir.clone(),
             class_dependencies: dependencies,
         });
     }
     
+    debug!("Completed dependency extraction for {} missions", missions.len());
     Ok(results)
-} 
+}
