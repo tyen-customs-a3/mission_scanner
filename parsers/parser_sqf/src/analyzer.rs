@@ -55,6 +55,21 @@ impl Analyzer {
                 
                 // Collection phase
                 self.current_scope = name.clone();
+                
+                // Special handling for nested arrays in assignments
+                if let Expression::Array(elements, _) = expr {
+                    for element in elements {
+                        if let Expression::Array(nested_elements, _) = element {
+                            // Process nested arrays directly
+                            for nested in nested_elements {
+                                if let Expression::String(s, _, _) = nested {
+                                    self.collected.pending_items.push((s.to_string(), ItemKind::Item));
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 self.collect_from_expression(expr);
                 self.current_scope.clear();
                 self.collected.variables.insert(name, var_type);
@@ -136,20 +151,35 @@ impl Analyzer {
         match function_name.to_lowercase().as_str() {
             "ace_cargo_fnc_loaditem" | "ace_cargo_fnc_loadItem" => {
                 // In SQF: [item, vehicle] call ace_cargo_fnc_loadItem
-                // where args[0] is 'ace_cargo_fnc_loadItem', args[1] is the item ID, args[2] is the vehicle
-                if args.len() >= 2 {
-                    if let Expression::String(s, _, _) = &args[1] {
-                        let kind = self.infer_item_kind(s, "cargo");
-                        self.collected.pending_items.push((s.to_string(), kind));
-                        return true;
+                // where args[0] is the item ID, args[1] is the vehicle
+                if args.len() >= 1 {
+                    match &args[0] {
+                        Expression::String(s, _, _) => {
+                            let kind = self.infer_item_kind(s, "cargo");
+                            self.collected.pending_items.push((s.to_string(), kind));
+                            return true;
+                        }
+                        Expression::Array(elements, _) => {
+                            // Handle case where first argument is an array
+                            if elements.len() >= 1 {
+                                if let Expression::String(s, _, _) = &elements[0] {
+                                    let kind = self.infer_item_kind(s, "cargo");
+                                    self.collected.pending_items.push((s.to_string(), kind));
+                                    return true;
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
             "ace_arsenal_fnc_initbox" => {
                 // Process all items in the array
-                if args.len() >= 2 {
-                    // Args should be [functionName, box, items]
-                    match &args[2] {
+                if args.len() >= 1 {
+                    // Args should be [box, items] or just [items]
+                    let items_arg = if args.len() >= 2 { &args[1] } else { &args[0] };
+                    
+                    match items_arg {
                         Expression::Array(elements, _) => {
                             for element in elements {
                                 self.process_arsenal_item(element);
@@ -209,8 +239,47 @@ impl Analyzer {
                 }
             }
             Expression::Array(elements, _) => {
+                // Process each element in the array
                 for element in elements {
-                    self.process_arsenal_item(element);
+                    match element {
+                        Expression::String(s, _, _) => {
+                            // Add string elements directly
+                            self.collected.pending_items.push((s.to_string(), ItemKind::Item));
+                        }
+                        Expression::Array(nested_elements, _) => {
+                            // Process nested arrays - extract all strings from nested arrays
+                            for nested in nested_elements {
+                                if let Expression::String(s, _, _) = nested {
+                                    self.collected.pending_items.push((s.to_string(), ItemKind::Item));
+                                } else {
+                                    // Recursively process more complex nested elements
+                                    self.process_arsenal_item(nested);
+                                }
+                            }
+                        }
+                        Expression::Variable(var, _) => {
+                            // Process variables in arrays
+                            if let Some(var_type) = self.collected.variables.get(var) {
+                                match var_type {
+                                    VariableType::Item(kind) => {
+                                        self.collected.pending_items.push((var.to_string(), kind.clone()));
+                                    }
+                                    VariableType::Array(types) => {
+                                        for item_type in types {
+                                            if let VariableType::Item(kind) = item_type {
+                                                self.collected.pending_items.push((var.to_string(), kind.clone()));
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                // If variable not found in collected variables, still add it
+                                self.collected.pending_items.push((var.to_string(), ItemKind::Item));
+                            }
+                        }
+                        _ => self.process_arsenal_item(element),
+                    }
                 }
             }
             Expression::BinaryCommand(cmd, lhs, rhs, _) => {
@@ -253,6 +322,14 @@ impl Analyzer {
         false
     }
 
+    // Check if this is a getVariable command
+    fn is_getvariable_command(&self, cmd: &BinaryCommand) -> bool {
+        if let BinaryCommand::Named(name) = cmd {
+            return name.to_lowercase() == "getvariable";
+        }
+        false
+    }
+
     fn collect_from_expression(&mut self, expr: &Expression) {
         // Skip diary entries
         if self.is_diary_context(expr) {
@@ -288,6 +365,105 @@ impl Analyzer {
                         return;
                     }
                     
+                    // Skip getVariable parameters
+                    if self.is_getvariable_command(cmd) {
+                        // We still need to process the left-hand side (the object)
+                        self.collect_from_expression(lhs);
+                        // But we skip processing the right-hand side (the variable name and default value)
+                        return;
+                    }
+                    
+                    // Handle function calls with the 'call' command
+                    if name == "call" {
+                        // Process the left-hand side (arguments)
+                        self.collect_from_expression(lhs);
+                        
+                        // Handle specific function calls
+                        if let Expression::Variable(func_name, _) = &**rhs {
+                            // Handle ace_arsenal_fnc_initBox
+                            if func_name.to_lowercase() == "ace_arsenal_fnc_initbox" {
+                                if let Expression::Array(elements, _) = &**lhs {
+                                    // Process all elements in the array
+                                    for element in elements {
+                                        self.process_arsenal_item(element);
+                                    }
+                                } else if let Expression::Variable(var_name, _) = &**lhs {
+                                    // If we're calling with a variable, process it
+                                    if let Some(var_type) = self.collected.variables.get(var_name) {
+                                        match var_type {
+                                            VariableType::Array(types) => {
+                                                for item_type in types {
+                                                    if let VariableType::Item(kind) = item_type {
+                                                        self.collected.pending_items.push((var_name.to_string(), kind.clone()));
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                return;
+                            }
+                            
+                            // Handle ace_cargo_fnc_loadItem
+                            if func_name.to_lowercase() == "ace_cargo_fnc_loaditem" {
+                                if let Expression::Array(elements, _) = &**lhs {
+                                    if elements.len() >= 1 {
+                                        if let Expression::String(item_id, _, _) = &elements[0] {
+                                            self.collected.pending_items.push((item_id.to_string(), ItemKind::Item));
+                                        }
+                                    }
+                                }
+                                return;
+                            }
+                        }
+                        
+                        // Process the right-hand side (function name)
+                        self.collect_from_expression(rhs);
+                        return;
+                    }
+                    
+                    // Handle specific commands that add items
+                    match name.to_string().to_lowercase().as_str() {
+                        "addweapon" | "addweaponwithammo" | "addweaponcargo" | "addweaponcargoglobal" => {
+                            if let Expression::String(s, _, _) = &**rhs {
+                                self.collected.pending_items.push((s.to_string(), ItemKind::Weapon));
+                                return;
+                            }
+                        }
+                        "addmagazine" | "addmagazinecargo" | "addmagazinecargoglobal" | "addmagazines" => {
+                            if let Expression::String(s, _, _) = &**rhs {
+                                self.collected.pending_items.push((s.to_string(), ItemKind::Magazine));
+                                return;
+                            }
+                        }
+                        "addbackpack" | "addbackpackcargo" | "addbackpackcargoglobal" => {
+                            if let Expression::String(s, _, _) = &**rhs {
+                                self.collected.pending_items.push((s.to_string(), ItemKind::Backpack));
+                                return;
+                            }
+                        }
+                        "addvest" | "additemtovest" => {
+                            if let Expression::String(s, _, _) = &**rhs {
+                                self.collected.pending_items.push((s.to_string(), ItemKind::Vest));
+                                return;
+                            }
+                        }
+                        "adduniform" | "forceadduniform" | "additemtouniform" => {
+                            if let Expression::String(s, _, _) = &**rhs {
+                                self.collected.pending_items.push((s.to_string(), ItemKind::Uniform));
+                                return;
+                            }
+                        }
+                        "addheadgear" | "addgoggles" | "additem" | "additemcargo" | "additemcargoglobal" | "additemtobackpack" => {
+                            if let Expression::String(s, _, _) = &**rhs {
+                                self.collected.pending_items.push((s.to_string(), ItemKind::Item));
+                                return;
+                            }
+                        }
+                        _ => {}
+                    }
+                    
                     // Process other binary commands
                     let args = vec![lhs.as_ref().clone(), rhs.as_ref().clone()];
                     if self.handle_function_call(name, &args) {
@@ -320,6 +496,11 @@ impl Analyzer {
     fn analyze_command(&self, cmd: &BinaryCommand, lhs: &Expression, rhs: &Expression) -> Option<Vec<(String, ItemKind)>> {
         match cmd {
             BinaryCommand::Named(name) => {
+                // Skip getVariable parameters
+                if name.to_lowercase() == "getvariable" {
+                    return None;
+                }
+                
                 match name.to_string().to_lowercase().as_str() {
                     // Explicit weapon functions that set ItemKind based on function name
                     "addweapon" | "addweaponwithammo" | "addweaponcargo" | "addweaponcargoglobal" => self.extract_item(rhs, ItemKind::Weapon),
@@ -425,7 +606,12 @@ impl Analyzer {
                 }
             }
             Expression::BinaryCommand(cmd, lhs, rhs, _) => {
+                // Skip getVariable parameters
                 if let BinaryCommand::Named(name) = cmd {
+                    if name.to_lowercase() == "getvariable" {
+                        return None;
+                    }
+                    
                     if name == "select" {
                         if let Expression::Variable(var, _) = &**lhs {
                             if let Some(VariableType::Array(types)) = self.collected.variables.get(var) {
@@ -569,6 +755,7 @@ mod tests {
         let items = process_code(code);
         
         // Debug what items we're finding
+        println!("Found {} items in test_nested_arrays:", items.len());
         for (i, item) in items.iter().enumerate() {
             println!("Item {}: {} (kind: {:?})", i, item.item.item_id, item.item.kind);
         }
@@ -651,7 +838,39 @@ mod tests {
         "#;
         let items = process_code(code);
         
+        // Debug what items we're finding
+        println!("Found {} items in test_cargo_operations:", items.len());
+        for (i, item) in items.iter().enumerate() {
+            println!("Item {}: {} (kind: {:?})", i, item.item.item_id, item.item.kind);
+        }
+        
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].item.item_id, "Land_CanisterFuel_Red_F");
+    }
+
+    #[test]
+    fn test_getvariable_not_treated_as_item() {
+        let code = r#"
+            private _unitRole = _unit getVariable ["tmf_assignGear_role", nil];
+            private _unitRoleCommon = ["rm","rm_lat","rm_mat", "medic", "engineer"];
+            private _unitRoleForceBackpack = ["rm_mat", "medic", "engineer"];
+        "#;
+        let items = process_code(code);
+        
+        // Verify that "tmf_assignGear_role" is not treated as an item
+        assert!(
+            !items.iter().any(|item| item.item.item_id == "tmf_assignGear_role"),
+            "getVariable parameter 'tmf_assignGear_role' should not be treated as an item"
+        );
+        
+        // Verify that array elements are still found as items
+        let expected_items = vec!["rm", "rm_lat", "rm_mat", "medic", "engineer"];
+        for item in expected_items {
+            assert!(
+                items.iter().any(|i| i.item.item_id == item),
+                "Expected array item '{}' not found",
+                item
+            );
+        }
     }
 }

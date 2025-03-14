@@ -2,10 +2,13 @@
 mod integration_tests {
     use std::fs;
     use std::path::{PathBuf, Path};
+    use std::io::Write;
     use parser_sqf::{parse_file, ItemKind};
     use hemtt_workspace::{Workspace, LayerType, WorkspacePath};
     use hemtt_common::config::PDriveOption;
     use log::debug;
+    use std::fs::File;
+    use tempfile::tempdir;
 
     fn init() {
         let _ = env_logger::builder()
@@ -99,6 +102,46 @@ mod integration_tests {
             assert!(
                 result.iter().any(|i| i.class_name == item && i.kind == ItemKind::Item),
                 "Expected generic item '{}' not found or has wrong type",
+                item
+            );
+        }
+    }
+
+    #[test]
+    fn test_getvariable_not_treated_as_item() {
+        init();
+
+        // Create a temporary directory for our test file
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let test_file_path = temp_dir.path().join("test_getvariable.sqf");
+        
+        // Create test content
+        let test_content = r#"
+        private _unitRole = _unit getVariable ["tmf_assignGear_role", nil];
+        private _unitRoleCommon = ["rm","rm_lat","rm_mat", "medic", "engineer"];
+        private _unitRoleForceBackpack = ["rm_mat", "medic", "engineer"];
+        "#;
+        
+        // Write the test content to the file
+        let mut file = File::create(&test_file_path).expect("Failed to create test file");
+        file.write_all(test_content.as_bytes()).expect("Failed to write test content");
+        
+        // Parse the file
+        let result = parse_file(&test_file_path).expect("Failed to parse test_getvariable.sqf");
+        
+        // Verify that "tmf_assignGear_role" is not treated as an item
+        assert!(
+            !result.iter().any(|item| item.class_name == "tmf_assignGear_role"),
+            "getVariable parameter 'tmf_assignGear_role' should not be treated as an item"
+        );
+        
+        // Verify that array elements are still found as items
+        // These should be found because they're in an array assignment
+        let expected_items = vec!["rm", "rm_lat", "rm_mat", "medic", "engineer"];
+        for item in expected_items {
+            assert!(
+                result.iter().any(|i| i.class_name == item),
+                "Expected array item '{}' not found",
                 item
             );
         }
