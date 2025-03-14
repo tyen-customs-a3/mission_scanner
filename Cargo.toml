@@ -61,3 +61,7 @@ pretty_assertions = "1.4.0"
 name = "integration"
 path = "tests/integration_test.rs"
 harness = true
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
