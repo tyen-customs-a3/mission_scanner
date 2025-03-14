@@ -52,6 +52,13 @@ pub fn parse_file(file_path: &Path) -> Result<Vec<ClassReference>> {
         Err(e) => warn!("Failed to parse {}: {}", file_path.display(), e),
     }
 
+    // Filter out empty class names
+    if let Ok(deps) = &result {
+        if deps.iter().any(|d| d.class_name.is_empty()) {
+            warn!("Found empty class names in file: {}", file_path.display());
+        }
+    }
+
     result
 }
 
