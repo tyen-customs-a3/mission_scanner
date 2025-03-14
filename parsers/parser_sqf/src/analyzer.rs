@@ -57,13 +57,25 @@ impl Analyzer {
                 self.current_scope = name.clone();
                 
                 // Special handling for nested arrays in assignments
+                // Only add items directly from arrays if they're in a context related to items
                 if let Expression::Array(elements, _) = expr {
-                    for element in elements {
-                        if let Expression::Array(nested_elements, _) = element {
-                            // Process nested arrays directly
-                            for nested in nested_elements {
-                                if let Expression::String(s, _, _) = nested {
-                                    self.collected.pending_items.push((s.to_string(), ItemKind::Item));
+                    let is_item_context = name.contains("weapon") || 
+                                         name.contains("magazine") || 
+                                         name.contains("item") || 
+                                         name.contains("backpack") || 
+                                         name.contains("vest") || 
+                                         name.contains("uniform") ||
+                                         name.contains("arsenal") || 
+                                         name.contains("cargo");
+                    
+                    if is_item_context {
+                        for element in elements {
+                            if let Expression::Array(nested_elements, _) = element {
+                                // Process nested arrays directly
+                                for nested in nested_elements {
+                                    if let Expression::String(s, _, _) = nested {
+                                        self.collected.pending_items.push((s.to_string(), ItemKind::Item));
+                                    }
                                 }
                             }
                         }
@@ -80,38 +92,48 @@ impl Analyzer {
     fn infer_type(&self, expr: &Expression, name: &str) -> VariableType {
         match expr {
             Expression::Array(elements, _) => {
-                let mut types = Vec::new();
-                for element in elements {
-                    match element {
-                        Expression::String(s, _, _) => {
-                            // Infer type based on string content or variable name
-                            let kind = self.infer_item_kind(s, name);
-                            types.push(VariableType::Item(kind));
-                        }
-                        Expression::Variable(var, _) => {
-                            if let Some(var_type) = self.collected.variables.get(var) {
-                                types.push(var_type.clone());
+                // Only infer types for arrays in specific contexts related to items
+                // This is important for tracking variables that will be used in functions later
+                if name.contains("weapon") || name.contains("magazine") || 
+                   name.contains("item") || name.contains("backpack") || 
+                   name.contains("vest") || name.contains("uniform") ||
+                   name.contains("arsenal") || name.contains("cargo") {
+                    let mut types = Vec::new();
+                    for element in elements {
+                        match element {
+                            Expression::String(s, _, _) => {
+                                // Infer type based on string content or variable name
+                                let kind = self.infer_item_kind(s, name);
+                                types.push(VariableType::Item(kind));
                             }
-                        }
-                        Expression::Array(nested_elements, _) => {
-                            // Handle nested arrays
-                            let mut nested_types = Vec::new();
-                            for nested in nested_elements {
-                                if let Expression::String(s, _, _) = nested {
-                                    let kind = self.infer_item_kind(s, name);
-                                    nested_types.push(VariableType::Item(kind));
+                            Expression::Variable(var, _) => {
+                                if let Some(var_type) = self.collected.variables.get(var) {
+                                    types.push(var_type.clone());
                                 }
                             }
-                            if !nested_types.is_empty() {
-                                types.push(VariableType::Array(nested_types));
+                            Expression::Array(nested_elements, _) => {
+                                // Handle nested arrays
+                                let mut nested_types = Vec::new();
+                                for nested in nested_elements {
+                                    if let Expression::String(s, _, _) = nested {
+                                        let kind = self.infer_item_kind(s, name);
+                                        nested_types.push(VariableType::Item(kind));
+                                    }
+                                }
+                                if !nested_types.is_empty() {
+                                    types.push(VariableType::Array(nested_types));
+                                }
                             }
+                            _ => {}
                         }
-                        _ => {}
                     }
-                }
-                if !types.is_empty() {
-                    VariableType::Array(types)
+                    if !types.is_empty() {
+                        VariableType::Array(types)
+                    } else {
+                        VariableType::Unknown
+                    }
                 } else {
+                    // For arrays not in specific contexts, don't treat elements as items
                     VariableType::Unknown
                 }
             }
@@ -340,20 +362,43 @@ impl Analyzer {
             Expression::Array(elements, _) => {
                 // Only process arrays in specific contexts
                 if !self.current_scope.is_empty() {
-                    // Process arrays in assignments
-                    for element in elements {
-                        match element {
-                            Expression::String(s, _, _) => {
-                                let kind = self.infer_item_kind(s, &self.current_scope);
-                                self.collected.pending_items.push((s.to_string(), kind));
+                    // Only process arrays in specific contexts related to items
+                    let is_item_context = self.current_scope.contains("weapon") || 
+                                         self.current_scope.contains("magazine") || 
+                                         self.current_scope.contains("item") || 
+                                         self.current_scope.contains("backpack") || 
+                                         self.current_scope.contains("vest") || 
+                                         self.current_scope.contains("uniform") ||
+                                         self.current_scope.contains("arsenal") || 
+                                         self.current_scope.contains("cargo");
+                    
+                    if is_item_context {
+                        // Process arrays in assignments related to items
+                        for element in elements {
+                            match element {
+                                Expression::String(s, _, _) => {
+                                    let kind = self.infer_item_kind(s, &self.current_scope);
+                                    self.collected.pending_items.push((s.to_string(), kind));
+                                }
+                                Expression::Array(nested_elements, _) => {
+                                    // Process nested arrays
+                                    for nested in nested_elements {
+                                        self.collect_from_expression(nested);
+                                    }
+                                }
+                                _ => self.collect_from_expression(element),
                             }
-                            Expression::Array(nested_elements, _) => {
-                                // Process nested arrays
+                        }
+                    } else {
+                        // For non-item contexts, just process the expressions but don't add items
+                        for element in elements {
+                            if let Expression::Array(nested_elements, _) = element {
                                 for nested in nested_elements {
                                     self.collect_from_expression(nested);
                                 }
+                            } else {
+                                self.collect_from_expression(element);
                             }
-                            _ => self.collect_from_expression(element),
                         }
                     }
                 }
@@ -863,14 +908,67 @@ mod tests {
             "getVariable parameter 'tmf_assignGear_role' should not be treated as an item"
         );
         
-        // Verify that array elements are still found as items
-        let expected_items = vec!["rm", "rm_lat", "rm_mat", "medic", "engineer"];
-        for item in expected_items {
+        // Verify that array elements are not found as items when they're not in an item context
+        let unexpected_items = vec!["rm", "rm_lat", "rm_mat", "medic", "engineer"];
+        for item in unexpected_items {
             assert!(
-                items.iter().any(|i| i.item.item_id == item),
-                "Expected array item '{}' not found",
+                !items.iter().any(|i| i.item.item_id == item),
+                "Unexpected array item '{}' should not be treated as an item",
                 item
             );
         }
+    }
+
+    #[test]
+    fn test_function_parameters_not_treated_as_items() {
+        let code = r#"
+            private _trace = lineIntersectsSurfaces [eyePos _unit, eyePos _unit vectorAdd [0, 0, 10], _unit, objNull, true, -1, "GEOM", "NONE", true];
+            private _surfaces = lineIntersectsSurfaces [_start, _end, _ignore, _ignore, true, 1, "FIRE", "VIEW"];
+        "#;
+        let items = process_code(code);
+        
+        // Verify that string literals used as function parameters are not treated as items
+        let unexpected_items = vec!["GEOM", "NONE", "FIRE", "VIEW"];
+        for item in unexpected_items {
+            assert!(
+                !items.iter().any(|i| i.item.item_id == item),
+                "Function parameter '{}' was incorrectly treated as an item",
+                item
+            );
+        }
+    }
+
+    #[test]
+    fn test_diary_records_not_treated_as_items() {
+        let code = r#"
+        private _situation = ["diary", ["Situation","
+        <font size='18'>ENEMY FORCES</font>
+        <br/>
+        Platoon strength infantry guarding the town. motorized, mechanized and heliborne infantry within the area will likely respond.
+        <br/><br/>
+        <font size='18'>FRIENDLY FORCES</font>
+        <br/>
+        an upsized squad of enthusiastic and eclectically armed guerrillas.
+        "]];
+
+        private _mission = ["diary", ["Mission","
+        <br/>
+        Destroy or steal all ammo caches in the town of abdera to the south.
+        <br/><br/>
+        Retreat to the north after mission completion
+        "]];
+
+        player createDiaryRecord _mission;
+        player createDiaryRecord _situation;
+        "#;
+        let items = process_code(code);
+        
+        // Verify that no items are found in the diary record creation code
+        assert!(
+            items.is_empty(),
+            "Found {} items in diary record code when none were expected: {:?}",
+            items.len(),
+            items.iter().map(|item| &item.item.item_id).collect::<Vec<_>>()
+        );
     }
 }
