@@ -85,6 +85,8 @@ pub struct MissionResults {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassReference {
     /// Name of the class
+    /// Note: Arma 3 class names are case-insensitive. When comparing class names,
+    /// they should be converted to lowercase first.
     pub class_name: String,
     /// Type of reference
     pub reference_type: ReferenceType,

@@ -28,6 +28,10 @@ use crate::types::{ClassReference, ReferenceType};
 /// 
 /// * `Ok(Vec<ClassReference>)` - List of class references found in the file
 /// * `Err` - If file reading or parsing fails
+/// 
+/// Note: Arma 3 class names are case-insensitive, but we preserve the original case
+/// in the returned ClassReference objects. When comparing class names later,
+/// they should be compared case-insensitively.
 pub fn parse_file(file_path: &Path) -> Result<Vec<ClassReference>> {
     let extension = file_path.extension()
         .and_then(|ext| ext.to_str())
