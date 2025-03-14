@@ -1,7 +1,6 @@
 [workspace]
 members = [
     ".",
-    "parsers/parser_code",
     "parsers/parser_sqf",
     "parsers/parser_sqm",
     "parsers/parser_hpp"
@@ -30,7 +29,7 @@ hemtt-preprocessor = { workspace = true }
 hemtt-common = { workspace = true }
 hemtt-config = { workspace = true }
 clap = { version = "4.5.32", features = ["derive"] }
-tokio = { version = "1.44.0", features = ["full"] }
+tokio = { version = "1.44.1", features = ["full"] }
 futures = "0.3.31"
 walkdir = "2.5.0"
 log = "0.4.26"
@@ -42,20 +41,23 @@ anyhow = "1.0.97"
 rayon = "1.10.0"
 indicatif = { version = "0.17.11", features = ["rayon"] }
 chrono = { version = "0.4.40", features = ["serde"] }
-once_cell = "1.21.0"
+once_cell = "1.21.1"
 num_cpus = "1.16.0"
 regex = "1.11.1"
 
 [dev-dependencies]
-tempfile = "3.18.0"
-
-[[example]]
-name = "batch_process"
-path = "examples/batch_process.rs"
+tempfile = "3.19.0"
+test-log = "0.2.14"
+pretty_assertions = "1.4.0"
 
 [lints.rust]
-dead_code = "allow"
-unused_parens = "allow"
-unused_imports = "allow"
-unused_variables = "allow"
-unused_mut = "allow"
+# dead_code = "allow"
+# unused_parens = "allow"
+# unused_imports = "allow"
+# unused_variables = "allow"
+# unused_mut = "allow"
+
+[[test]]
+name = "integration"
+path = "tests/integration_test.rs"
+harness = true

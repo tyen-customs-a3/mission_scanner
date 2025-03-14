@@ -1,14 +1,16 @@
-use std::path::Path;
+// Std imports
 use std::fs;
+use std::path::Path;
+
+// External crate imports
 use anyhow::{Result, anyhow};
 use log::{debug, warn};
-
 use parser_hpp::{parse_file as parser_hpp_file, HppValue};
-use parser_sqm::{parse_sqm as parse_sqm_file, extract_class_dependencies};
 use parser_sqf::{parse_file as parse_sqf_file, ItemKind};
+use parser_sqm::{parse_sqm as parse_sqm_file, extract_class_dependencies};
 
-use crate::types::ClassDependency;
-use crate::types::ReferenceType;
+// Internal crate imports
+use crate::types::{ClassReference, ReferenceType};
 
 /// Parse any supported file type and extract class dependencies.
 /// 
@@ -21,13 +23,12 @@ use crate::types::ReferenceType;
 /// # Arguments
 /// 
 /// * `file_path` - Path to the file to parse
-/// * `workspace` - Optional workspace path for enhanced parsing configuration
 /// 
 /// # Returns
 /// 
-/// * `Ok(Vec<ClassDependency>)` - List of class dependencies found in the file
+/// * `Ok(Vec<ClassReference>)` - List of class references found in the file
 /// * `Err` - If file reading or parsing fails
-pub fn parse_file(file_path: &Path) -> Result<Vec<ClassDependency>> {
+pub fn parse_file(file_path: &Path) -> Result<Vec<ClassReference>> {
     let extension = file_path.extension()
         .and_then(|ext| ext.to_str())
         .ok_or_else(|| anyhow!("File has no extension: {}", file_path.display()))?
@@ -51,7 +52,7 @@ pub fn parse_file(file_path: &Path) -> Result<Vec<ClassDependency>> {
 }
 
 /// Parse a loadout file and extract equipment information
-pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassDependency>> {
+pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassReference>> {
     debug!("Starting loadout file parse: {}", file_path.display());
     
     // Parse using parser_hpp
@@ -68,7 +69,7 @@ pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassDependency>> {
         
         // Add parent class as inheritance dependency if it exists
         if let Some(parent) = class.parent {
-            dependencies.push(ClassDependency {
+            dependencies.push(ClassReference {
                 class_name: parent,
                 reference_type: ReferenceType::Inheritance,
                 context: format!("loadout:class:{}", file_path.display())
@@ -79,7 +80,7 @@ pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassDependency>> {
         for property in class.properties {
             if let HppValue::Array(items) = property.value {
                 for item in items {
-                    dependencies.push(ClassDependency {
+                    dependencies.push(ClassReference {
                         class_name: item,
                         reference_type: ReferenceType::Direct,
                         context: format!("loadout:item:{}", file_path.display())
@@ -94,7 +95,7 @@ pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassDependency>> {
 }
 
 /// Parse a SQM file and extract class references
-pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassDependency>> {
+pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassReference>> {
     debug!("Starting SQM file parse: {}", file_path.display());
     
     // Read the file contents
@@ -122,7 +123,7 @@ pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassDependency>> {
             let addon = addon.trim().trim_matches('"');
             if !addon.is_empty() {
                 debug!("Found addon dependency: {}", addon);
-                dependencies.push(ClassDependency {
+                dependencies.push(ClassReference {
                     class_name: addon.to_string(),
                     reference_type: ReferenceType::Direct,
                     context: format!("sqm:addons[]:{}", file_path.display())
@@ -144,12 +145,12 @@ pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassDependency>> {
             dependencies.extend(inventory_classes.into_iter()
                 .flat_map(|ic| {
                     let mut deps = Vec::new();
-                    deps.push(ClassDependency {
+                    deps.push(ClassReference {
                         class_name: ic.parent_class,
                         reference_type: ReferenceType::Inheritance,
                         context: format!("sqm:class:{}", file_path.display())
                     });
-                    deps.extend(ic.references.into_iter().map(|ref_class| ClassDependency {
+                    deps.extend(ic.references.into_iter().map(|ref_class| ClassReference {
                         class_name: ref_class.name,
                         reference_type: ReferenceType::Direct,
                         context: format!("sqm:inventory:{}", file_path.display())
@@ -167,7 +168,7 @@ pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassDependency>> {
         debug!("Found additional class dependency: {}", class_name);
     }
     dependencies.extend(class_deps.into_iter()
-        .map(|class_name| ClassDependency {
+        .map(|class_name| ClassReference {
             class_name,
             reference_type: ReferenceType::Direct,
             context: format!("sqm:class:{}", file_path.display())
@@ -178,7 +179,7 @@ pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassDependency>> {
 }
 
 /// Wrapper around the SQF parser that converts its output to our format
-pub fn parse_sqf(file_path: &Path) -> Result<Vec<ClassDependency>> {
+pub fn parse_sqf(file_path: &Path) -> Result<Vec<ClassReference>> {
     debug!("Starting SQF file parse: {}", file_path.display());
     
     // Use the parser_sqf crate's API
@@ -191,8 +192,8 @@ pub fn parse_sqf(file_path: &Path) -> Result<Vec<ClassDependency>> {
     }
     
     // Convert to our format
-    let dependencies: Vec<ClassDependency> = items.into_iter()
-        .map(|item| ClassDependency {
+    let dependencies: Vec<ClassReference> = items.into_iter()
+        .map(|item| ClassReference {
             class_name: item.class_name,
             reference_type: match item.kind {
                 ItemKind::Weapon => ReferenceType::Direct,

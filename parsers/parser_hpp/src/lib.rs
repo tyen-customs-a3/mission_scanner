@@ -115,7 +115,6 @@ impl HppParser {
 
                     classes.push(hpp_class);
 
-                    // Recursively extract nested classes
                     for prop in properties {
                         if let Property::Class(_) = prop {
                             let mut nested_classes = Vec::new();

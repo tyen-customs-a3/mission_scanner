@@ -1,9 +1,10 @@
-use std::path::{Path, PathBuf};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
 use anyhow::{Result, anyhow};
 use walkdir::WalkDir;
 
-use crate::types::{MissionExtractionResult, MissionScannerConfig};
+use crate::types::MissionFileResults;
 
 /// Check if a path is a mission directory
 fn is_mission_directory(path: &Path) -> bool {
@@ -11,7 +12,7 @@ fn is_mission_directory(path: &Path) -> bool {
 }
 
 /// Find mission.sqm in a directory
-fn find_mission_sqm(dir: &Path) -> Result<Option<PathBuf>> {
+pub fn find_mission_file(dir: &Path) -> Result<Option<PathBuf>> {
     let sqm_path = dir.join("mission.sqm");
     if sqm_path.exists() {
         Ok(Some(sqm_path))
@@ -21,7 +22,11 @@ fn find_mission_sqm(dir: &Path) -> Result<Option<PathBuf>> {
 }
 
 /// Find all SQF files in a directory
-fn find_sqf_files(dir: &Path) -> Result<Vec<PathBuf>> {
+pub fn find_script_files(dir: &Path, allowed_extensions: &[String]) -> Result<Vec<PathBuf>> {
+    if !allowed_extensions.contains(&"sqf".to_string()) {
+        return Ok(Vec::new());
+    }
+
     let mut sqf_files = Vec::new();
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -33,14 +38,22 @@ fn find_sqf_files(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Find all CPP/HPP files in a directory
-fn find_cpp_files(dir: &Path) -> Result<Vec<PathBuf>> {
+pub fn find_code_files(dir: &Path, allowed_extensions: &[String]) -> Result<Vec<PathBuf>> {
+    // Check if any code file extensions are allowed
+    let has_code_extensions = allowed_extensions.iter().any(|ext| 
+        ext == "cpp" || ext == "hpp" || ext == "ext"
+    );
+    if !has_code_extensions {
+        return Ok(Vec::new());
+    }
+
     let mut cpp_files = Vec::new();
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.is_file() {
             if let Some(ext) = path.extension() {
                 let ext = ext.to_string_lossy().to_lowercase();
-                if ext == "cpp" || ext == "hpp" || ext == "ext" {
+                if allowed_extensions.contains(&ext.to_string()) {
                     cpp_files.push(path.to_path_buf());
                 }
             }
@@ -49,22 +62,12 @@ fn find_cpp_files(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(cpp_files)
 }
 
-/// Collect mission files from a directory
-pub fn collect_mission_files(dir: &Path) -> Result<Vec<MissionExtractionResult>> {
-    collect_mission_files_with_config(dir, &MissionScannerConfig::default())
-}
-
 /// Collect mission files from a directory with configuration
-pub fn collect_mission_files_with_config(dir: &Path, config: &MissionScannerConfig) -> Result<Vec<MissionExtractionResult>> {
+pub fn collect_mission_files(dir: &Path) -> Result<Vec<MissionFileResults>> {
     let mut results = Vec::new();
     
-    // Walk the directory recursively if configured
-    let walker = if config.recursive {
-        WalkDir::new(dir)
-    } else {
-        WalkDir::new(dir).max_depth(1)
-    };
-    
+    let walker = WalkDir::new(dir);
+
     // Track unique mission names to avoid duplicates
     let mut seen_missions = HashSet::new();
     
@@ -88,22 +91,20 @@ pub fn collect_mission_files_with_config(dir: &Path, config: &MissionScannerConf
         }
         
         // Find mission.sqm
-        let sqm_file = find_mission_sqm(path)?;
+        let mission_file = find_mission_file(path)?;
         
         // Find SQF files
-        let sqf_files = find_sqf_files(path)?;
+        let script_files = find_script_files(path, &["sqf".to_string()])?;
         
         // Find CPP/HPP files
-        let cpp_files = find_cpp_files(path)?;
+        let code_files = find_code_files(path, &["cpp".to_string(), "hpp".to_string(), "ext".to_string()])?;
         
-        results.push(MissionExtractionResult {
+        results.push(MissionFileResults {
             mission_name,
             mission_dir: path.to_path_buf(),
-            sqm_file,
-            sqf_files,
-            cpp_files,
-            pbo_path: None, // No PBO path for directory scans
-            class_dependencies: Vec::new(), // Initialize empty dependencies
+            sqm_file: mission_file,
+            sqf_files: script_files,
+            cpp_files: code_files,
         });
     }
     

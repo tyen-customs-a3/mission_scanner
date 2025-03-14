@@ -1,9 +1,57 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 
+/// Default file extensions to scan
+pub const DEFAULT_FILE_EXTENSIONS: &[&str] = &["sqm", "sqf", "cpp", "hpp"];
+
+/// Configuration for mission scanning
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanConfig {
+    /// Directory containing mission files to scan
+    pub input_dir: PathBuf,
+    /// Directory for caching extraction results
+    pub cache_dir: PathBuf,
+    /// Directory for output reports
+    pub output_dir: PathBuf,
+    /// Number of parallel threads to use (defaults to number of CPU cores)
+    pub threads: Option<usize>,
+    /// File extensions to scan (defaults to ["sqm", "sqf", "cpp", "hpp"])
+    pub file_extensions: Option<Vec<String>>,
+}
+
+impl Default for ScanConfig {
+    fn default() -> Self {
+        Self {
+            input_dir: PathBuf::new(),
+            cache_dir: PathBuf::new(),
+            output_dir: PathBuf::new(),
+            threads: Some(num_cpus::get()),
+            file_extensions: Some(DEFAULT_FILE_EXTENSIONS.iter().map(|&s| s.to_string()).collect()),
+        }
+    }
+}
+
+/// Configuration for the mission scanner implementation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionScannerConfig {
+    /// Maximum number of threads to use for scanning
+    pub max_threads: usize,
+    /// Extract only specific file extensions (empty = all)
+    pub file_extensions: Vec<String>,
+}
+
+impl Default for MissionScannerConfig {
+    fn default() -> Self {
+        Self {
+            max_threads: num_cpus::get(),
+            file_extensions: DEFAULT_FILE_EXTENSIONS.iter().map(|&s| s.to_string()).collect(),
+        }
+    }
+}
+
 /// Result of extracting mission files
 #[derive(Debug, Clone)]
-pub struct MissionExtractionResult {
+pub struct MissionFileResults {
     /// Name of the mission
     pub mission_name: String,
     /// Path to the mission directory
@@ -14,26 +62,28 @@ pub struct MissionExtractionResult {
     pub sqf_files: Vec<PathBuf>,
     /// List of CPP/HPP files in the mission
     pub cpp_files: Vec<PathBuf>,
-    /// Path to the PBO file if this is from a PBO
-    pub pbo_path: Option<PathBuf>,
-    /// List of class dependencies found in the mission
-    pub class_dependencies: Vec<ClassDependency>,
 }
 
 /// Result of analyzing mission dependencies
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MissionDependencyResult {
+pub struct MissionResults {
     /// Name of the mission
     pub mission_name: String,
-    /// Path to the mission file
-    pub mission_path: PathBuf,
+    /// Path to the mission directory
+    pub mission_dir: PathBuf,
+    /// Path to the mission.sqm file if it exists
+    pub sqm_file: Option<PathBuf>,
+    /// List of SQF files in the mission
+    pub sqf_files: Vec<PathBuf>,
+    /// List of CPP/HPP files in the mission
+    pub cpp_files: Vec<PathBuf>,
     /// List of class dependencies
-    pub class_dependencies: Vec<ClassDependency>,
+    pub class_dependencies: Vec<ClassReference>,
 }
 
 /// Class dependency information
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClassDependency {
+pub struct ClassReference {
     /// Name of the class
     pub class_name: String,
     /// Type of reference
@@ -53,84 +103,34 @@ pub enum ReferenceType {
     Variable,
 }
 
-/// Result of the mission scanning process
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MissionScanResult {
-    /// Name of the mission
-    pub mission_name: String,
-    /// Path to the original mission file
-    pub mission_path: PathBuf,
-    /// Hash of the mission file
-    pub hash: String,
-    /// Whether the mission was processed successfully
-    pub processed: bool,
-    /// Timestamp of when the mission was processed
-    pub timestamp: u64,
+/// Represents the source of an inventory item reference
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClassSource {
+    /// Found in a SQF script file
+    Script {
+        /// Path to the script file
+        file_path: String,
+    },
+    /// Found in mission.sqm
+    Mission {
+        /// Class or section where item was found
+        context: String,
+    },
+    /// Found in a config file
+    Code {
+        /// Path to the code file
+        file_path: String,
+        /// Class or section where item was found
+        class: String,
+    },
 }
 
-/// Statistics about the mission scanning process
-#[derive(Debug, Clone)]
-pub struct MissionScanStats {
-    /// Total number of missions found
-    pub total: usize,
-    /// Number of missions processed
-    pub processed: usize,
-    /// Number of missions that failed to process
-    pub failed: usize,
-    /// Number of missions that were unchanged since last scan
-    pub unchanged: usize,
-}
-
-/// Reason why a mission was skipped during scanning
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SkipReason {
-    /// Mission was unchanged since last scan
-    Unchanged,
-    /// Mission extraction failed
-    ExtractionFailed,
-    /// Mission analysis failed
-    AnalysisFailed,
-    /// Mission was empty
-    Empty,
-    /// Other reason (with description)
-    Other(String),
-}
-
-impl std::fmt::Display for SkipReason {
+impl std::fmt::Display for ClassSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SkipReason::Unchanged => write!(f, "Unchanged"),
-            SkipReason::ExtractionFailed => write!(f, "Extraction failed"),
-            SkipReason::AnalysisFailed => write!(f, "Analysis failed"),
-            SkipReason::Empty => write!(f, "Empty"),
-            SkipReason::Other(reason) => write!(f, "Other: {}", reason),
-        }
-    }
-}
-
-/// Configuration for the mission scanning process
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MissionScannerConfig {
-    /// Maximum number of threads to use for scanning
-    pub max_threads: usize,
-    /// Whether to force rescanning of unchanged missions
-    pub force_rescan: bool,
-    /// Skip extraction if PBO hash hasn't changed (uses database)
-    pub skip_unchanged: bool,
-    /// Extract only specific file extensions (empty = all)
-    pub file_extensions: Vec<String>,
-    /// Recursively scan subdirectories
-    pub recursive: bool,
-}
-
-impl Default for MissionScannerConfig {
-    fn default() -> Self {
-        Self {
-            max_threads: num_cpus::get(),
-            force_rescan: false,
-            skip_unchanged: true,
-            file_extensions: vec!["sqm".to_string(), "sqf".to_string(), "cpp".to_string(), "hpp".to_string()],
-            recursive: true,
+            ClassSource::Script { file_path } => write!(f, "Script: {}", file_path),
+            ClassSource::Mission { context } => write!(f, "Mission: {}", context),
+            ClassSource::Code { file_path, class } => write!(f, "Code: {} in {}", class, file_path),
         }
     }
 } 

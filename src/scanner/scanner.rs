@@ -1,115 +1,126 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
+
 use anyhow::{Result, anyhow};
-use log::{info, warn, debug};
-use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use log::{debug, info, warn};
+use rayon::prelude::*;
+use tokio::sync::Mutex;
 
-use crate::types::{MissionExtractionResult, MissionScannerConfig};
-use super::collector;
+use crate::types::{MissionScannerConfig, MissionResults};
+use super::{collector, parser};
 
-/// Scan mission files with configuration
-pub async fn scan_with_config(
-    input_dir: &Path,
+/// Scan a single mission directory with configuration
+pub async fn scan_mission(
+    mission_dir: &Path,
     threads: usize,
     config: &MissionScannerConfig
-) -> Result<Vec<MissionExtractionResult>> {
-    info!("Scanning for mission files in {} with configuration", input_dir.display());
+) -> Result<MissionResults> {
+    info!("Scanning mission directory: {}", mission_dir.display());
     debug!("Using {} threads", threads);
     debug!("Configuration: {:?}", config);
     
-    // Verify input directory exists and is readable
-    if !input_dir.exists() {
-        return Err(anyhow!("Input directory does not exist: {}", input_dir.display()));
+    // Verify mission directory exists and is readable
+    if !mission_dir.exists() {
+        return Err(anyhow!("Mission directory does not exist: {}", mission_dir.display()));
     }
     
-    if let Err(e) = std::fs::read_dir(input_dir) {
-        return Err(anyhow!("Input directory is not readable: {} - {}", input_dir.display(), e));
+    if let Err(e) = std::fs::read_dir(mission_dir) {
+        return Err(anyhow!("Mission directory is not readable: {} - {}", mission_dir.display(), e));
     }
     
-    // Collect mission files
-    let mission_files = if config.recursive {
-        collector::collect_mission_files_with_config(input_dir, config)?
-    } else {
-        collector::collect_mission_files(input_dir)?
-    };
+    // Get mission name from directory
+    let mission_name = mission_dir.file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow!("Invalid mission directory name"))?
+        .to_string();
     
-    if mission_files.is_empty() {
-        warn!("No mission files found in {}", input_dir.display());
-        return Ok(Vec::new());
+    // Find mission files
+    let sqm_file = collector::find_mission_file(mission_dir)?;
+    let sqf_files = collector::find_script_files(mission_dir, &config.file_extensions)?;
+    let cpp_files = collector::find_code_files(mission_dir, &config.file_extensions)?;
+    
+    if sqm_file.is_none() && sqf_files.is_empty() && cpp_files.is_empty() {
+        warn!("No mission files found in {}", mission_dir.display());
+        return Ok(MissionResults {
+            mission_name,
+            mission_dir: mission_dir.to_path_buf(),
+            sqm_file: None,
+            sqf_files: Vec::new(),
+            cpp_files: Vec::new(),
+            class_dependencies: Vec::new(),
+        });
     }
     
-    info!("Found {} mission files", mission_files.len());
+    info!("Found mission files: {} SQM, {} SQF, {} CPP/HPP", 
+        if sqm_file.is_some() { 1 } else { 0 },
+        sqf_files.len(),
+        cpp_files.len());
     
     // Set up progress bars
-    let multi_progress = MultiProgress::new();
-    let scan_progress = multi_progress.add(ProgressBar::new(mission_files.len() as u64));
+    let multi_progress = Arc::new(Mutex::new(MultiProgress::new()));
+    let scan_progress = multi_progress.lock().await.add(ProgressBar::new(1));
     scan_progress.set_style(ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
         .unwrap()
         .progress_chars("#>-"));
     scan_progress.set_message("Scanning mission files");
     
-    // Log each mission file found
-    for mission in &mission_files {
-        if let Some(sqm) = &mission.sqm_file {
-            debug!("  SQM file: {}", sqm.display());
+    let mut dependencies = Vec::new();
+    
+    // Process mission.sqm if present
+    if let Some(sqm_file) = &sqm_file {
+        debug!("Processing mission.sqm: {}", sqm_file.display());
+        match parser::parse_file(sqm_file) {
+            Ok(mut deps) => {
+                debug!("Found {} dependencies in SQM file", deps.len());
+                dependencies.append(&mut deps);
+            },
+            Err(e) => warn!("Failed to parse SQM file {}: {}", sqm_file.display(), e),
         }
-        debug!("  SQF files: {}", mission.sqf_files.len());
-        debug!("  CPP files: {}", mission.cpp_files.len());
-        debug!("Processing mission.sqm: {}", match &mission.sqm_file {
-            Some(path) => path.display().to_string(),
-            None => "None".to_string()
-        });
     }
     
-    scan_progress.finish_with_message(format!("Scanned {} missions", mission_files.len()));
+    // Process SQF files in parallel
+    let sqf_deps: Vec<_> = sqf_files.par_iter()
+        .flat_map(|file| {
+            debug!("Processing SQF file: {}", file.display());
+            parser::parse_file(file).unwrap_or_default()
+        })
+        .collect();
+    dependencies.extend(sqf_deps);
     
-    Ok(mission_files)
-}
-
-/// Scan mission files with default configuration
-pub async fn scan(
-    input_dir: &Path,
-    threads: usize,
-) -> Result<Vec<MissionExtractionResult>> {
-    // Use default config
-    let config = MissionScannerConfig::default();
-    scan_with_config(input_dir, threads, &config).await
-}
-
-/// Scan mission files with configuration options
-fn scan_mission_files_with_config(
-    mission_files: &[PathBuf],
-    progress: ProgressBar,
-    config: &MissionScannerConfig
-) -> Result<Vec<MissionScanResult>> {
-    let mut scan_results = Vec::new();
+    // Process CPP/HPP files in parallel
+    let cpp_deps: Vec<_> = cpp_files.par_iter()
+        .flat_map(|file| {
+            debug!("Processing CPP/HPP file: {}", file.display());
+            parser::parse_file(file).unwrap_or_default()
+        })
+        .collect();
+    dependencies.extend(cpp_deps);
     
-    for path in mission_files {
-        // Mission needs to be processed
-        let mission_name = path.file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        
-        let scan_result = MissionScanResult {
-            mission_name,
-            path: path.to_path_buf(),
-        };
-        
-        scan_results.push(scan_result);
-        progress.inc(1);
+    debug!("Total of {} dependencies found for mission {}", 
+        dependencies.len(), mission_name);
+    
+    // Log unique class names found
+    let unique_classes: std::collections::HashSet<_> = dependencies.iter()
+        .map(|d| d.class_name.as_str())
+        .collect();
+    
+    debug!("Unique class names found in {}:", mission_name);
+    for class in &unique_classes {
+        debug!("  - {}", class);
     }
     
-    progress.finish_with_message(format!("Scanned {} missions", mission_files.len()));
+    // Update progress
+    scan_progress.inc(1);
+    scan_progress.finish_with_message("Mission scan complete");
     
-    Ok(scan_results)
+    Ok(MissionResults {
+        mission_name,
+        mission_dir: mission_dir.to_path_buf(),
+        sqm_file,
+        sqf_files,
+        cpp_files,
+        class_dependencies: dependencies,
+    })
 }
-
-/// Mission scan result
-#[derive(Debug, Clone)]
-struct MissionScanResult {
-    /// Name of the mission
-    mission_name: String,
-    /// Path to the mission file
-    path: PathBuf,
-} 
