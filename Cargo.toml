@@ -7,11 +7,16 @@ members = [
 ]
 
 [workspace.dependencies]
-hemtt-sqf = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
-hemtt-workspace = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
-hemtt-preprocessor = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
-hemtt-common = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
-hemtt-config = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
+hemtt-sqf = { path = "../HEMTT/libs/sqf" }
+hemtt-workspace = { path = "../HEMTT/libs/workspace" }
+hemtt-preprocessor = { path = "../HEMTT/libs/preprocessor" }
+hemtt-common = { path = "../HEMTT/libs/common" }
+hemtt-config = { path = "../HEMTT/libs/config" }
+# hemtt-sqf = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
+# hemtt-workspace = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
+# hemtt-preprocessor = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
+# hemtt-common = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
+# hemtt-config = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
 
 [package]
 name = "mission_scanner"

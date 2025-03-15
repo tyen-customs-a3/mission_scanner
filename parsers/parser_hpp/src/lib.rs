@@ -143,17 +143,29 @@ impl HppParser {
                 for item in arr.items() {
                     match item {
                         Item::Str(s) => values.push(s.value().to_string()),
-                        Item::Macro((macro_name, item, _)) => {
-                            // Extract the count from the macro name (e.g., "LIST_2" -> 2)
-                            let count = macro_name.value()
-                                .strip_prefix("LIST_")
-                                .and_then(|n| n.parse::<usize>().ok())
-                                .unwrap_or(1);
-                            for _ in 0..count {
-                                values.push(item.value().to_string());
+                        Item::Number(n) => values.push(n.to_string()),
+                        Item::Macro { name, args, .. } => {
+                            let macro_name = name.value();
+                            
+                            if macro_name.starts_with("LIST_") {
+                                let count = macro_name
+                                    .strip_prefix("LIST_")
+                                    .and_then(|n| n.parse::<usize>().ok())
+                                    .unwrap_or(1);
+                                
+                                if let Some(first_arg) = args.first() {
+                                    for _ in 0..count {
+                                        values.push(first_arg.value().to_string());
+                                    }
+                                }
+                            } else {
+                                if let Some(first_arg) = args.first() {
+                                    values.push(first_arg.value().to_string());
+                                } else {
+                                    values.push(macro_name.to_string());
+                                }
                             }
                         }
-                        Item::Eval { expression, .. } => values.push(expression.value().to_string()),
                         _ => {}
                     }
                 }
