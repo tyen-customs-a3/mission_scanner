@@ -118,7 +118,7 @@ impl HppParser {
                     for prop in properties {
                         if let Property::Class(_) = prop {
                             let mut nested_classes = Vec::new();
-                            let nested_config = Config(vec![prop.clone()]);
+                            let nested_config = Config(vec![prop.clone()], vec![]);
                             self.extract_classes(&nested_config, &mut nested_classes);
                             classes.extend(nested_classes);
                         }
@@ -153,14 +153,21 @@ impl HppParser {
                                     .and_then(|n| n.parse::<usize>().ok())
                                     .unwrap_or(1);
                                 
+                                // For LIST_ macros, expand the arguments according to the count
                                 if let Some(first_arg) = args.first() {
                                     for _ in 0..count {
                                         values.push(first_arg.value().to_string());
                                     }
                                 }
                             } else {
-                                if let Some(first_arg) = args.first() {
-                                    values.push(first_arg.value().to_string());
+                                // For complex macros with multiple arguments, preserve all arguments
+                                let args_str = args.iter()
+                                    .map(|arg| arg.value().to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                
+                                if !args.is_empty() {
+                                    values.push(format!("{}({})", macro_name, args_str));
                                 } else {
                                     values.push(macro_name.to_string());
                                 }
