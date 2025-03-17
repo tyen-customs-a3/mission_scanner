@@ -118,7 +118,7 @@ impl HppParser {
                     for prop in properties {
                         if let Property::Class(_) = prop {
                             let mut nested_classes = Vec::new();
-                            let nested_config = Config(vec![prop.clone()], vec![]);
+                            let nested_config = Config(vec![prop.clone()]);
                             self.extract_classes(&nested_config, &mut nested_classes);
                             classes.extend(nested_classes);
                         }
@@ -140,12 +140,12 @@ impl HppParser {
             }
             Value::Array(arr) => {
                 let mut values = Vec::new();
-                for item in arr.items() {
+                for item in arr.items.iter() {
                     match item {
                         Item::Str(s) => values.push(s.value().to_string()),
                         Item::Number(n) => values.push(n.to_string()),
-                        Item::Macro { name, args, .. } => {
-                            let macro_name = name.value();
+                        Item::Macro(m) => {
+                            let macro_name = m.name.value();
                             
                             if macro_name.starts_with("LIST_") {
                                 let count = macro_name
@@ -154,19 +154,19 @@ impl HppParser {
                                     .unwrap_or(1);
                                 
                                 // For LIST_ macros, expand the arguments according to the count
-                                if let Some(first_arg) = args.first() {
+                                if let Some(first_arg) = m.args.first() {
                                     for _ in 0..count {
                                         values.push(first_arg.value().to_string());
                                     }
                                 }
                             } else {
                                 // For complex macros with multiple arguments, preserve all arguments
-                                let args_str = args.iter()
+                                let args_str = m.args.iter()
                                     .map(|arg| arg.value().to_string())
                                     .collect::<Vec<_>>()
                                     .join(", ");
                                 
-                                if !args.is_empty() {
+                                if !m.args.is_empty() {
                                     values.push(format!("{}({})", macro_name, args_str));
                                 } else {
                                     values.push(macro_name.to_string());
