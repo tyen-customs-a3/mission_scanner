@@ -87,15 +87,25 @@ pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassReference>> {
             });
         }
         
-        // Add each item as a direct dependency
+        // Add items only from named arrays we care about
         for property in class.properties {
             if let HppValue::Array(items) = property.value {
-                for item in items {
-                    dependencies.push(ClassReference {
-                        class_name: item,
-                        reference_type: ReferenceType::Direct,
-                        context: format!("loadout:item:{}", file_path.display())
-                    });
+                // Only process named array properties that typically contain equipment
+                let property_name = property.name.to_lowercase();
+                if is_equipment_array(&property_name) {
+                    debug!("Processing equipment array: {}", property_name);
+                    // Process each array item, stripping any extra quotes
+                    for item in items {
+                        // Skip empty items
+                        let clean_item = item.trim().trim_matches('"');
+                        if !clean_item.is_empty() {
+                            dependencies.push(ClassReference {
+                                class_name: clean_item.to_string(),
+                                reference_type: ReferenceType::Direct,
+                                context: format!("loadout:{}:{}", property_name, file_path.display())
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -104,6 +114,20 @@ pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassReference>> {
     debug!("Total of {} dependencies found in loadout file", dependencies.len());
     Ok(dependencies)
 }
+
+/// Determine if a property name is an equipment array we should process
+fn is_equipment_array(name: &str) -> bool {
+    // List of known equipment array property names in loadout files
+    const EQUIPMENT_ARRAYS: [&str; 17] = [
+        "uniform", "vest", "backpack", "headgear", "goggles", "hmd",
+        "primaryweapon", "secondaryweapon", "handgunweapon", "sidearmweapon",
+        "scope", "bipod", "attachment", "silencer", "magazines", "items", "linkeditems",
+        // Add any other relevant equipment array names here
+    ];
+    
+    EQUIPMENT_ARRAYS.iter().any(|&array_name| name == array_name)
+}
+
 
 /// Parse a SQM file and extract class references
 pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassReference>> {
