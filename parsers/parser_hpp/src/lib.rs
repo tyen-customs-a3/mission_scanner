@@ -148,19 +148,12 @@ impl HppParser {
                             let macro_name = m.name.value();
                             
                             if macro_name.starts_with("LIST_") {
-                                let count = macro_name
-                                    .strip_prefix("LIST_")
-                                    .and_then(|n| n.parse::<usize>().ok())
-                                    .unwrap_or(1);
-                                
-                                // For LIST_ macros, expand the arguments according to the count
+                                // Just add the inner item once, don't expand based on count
                                 if let Some(first_arg) = m.args.first() {
-                                    for _ in 0..count {
                                         values.push(first_arg.value().to_string());
-                                    }
                                 }
                             } else {
-                                // For complex macros with multiple arguments, preserve all arguments
+                                // For complex macros with multiple arguments, preserve as a single string
                                 let args_str = m.args.iter()
                                     .map(|arg| arg.value().to_string())
                                     .collect::<Vec<_>>()
