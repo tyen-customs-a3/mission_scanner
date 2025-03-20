@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use log::{debug, warn};
 use parser_hpp::{parse_file as parser_hpp_file, HppValue};
 use parser_sqf::{parse_file as parse_sqf_file, ItemKind};
-use parser_sqm::{parse_sqm as parse_sqm_file, extract_class_dependencies};
+use parser_sqm::extract_class_dependencies;
 
 // Internal crate imports
 use crate::types::{ClassReference, ReferenceType};
@@ -128,88 +128,23 @@ fn is_equipment_array(name: &str) -> bool {
     EQUIPMENT_ARRAYS.iter().any(|&array_name| name == array_name)
 }
 
-
 /// Parse a SQM file and extract class references
 pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassReference>> {
     debug!("Starting SQM file parse: {}", file_path.display());
     
-    // Read the file contents
     let content = fs::read_to_string(file_path)
         .map_err(|e| anyhow!("Failed to read SQM file: {}", e))?;
     
-    debug!("Read {} bytes from SQM file", content.len());
+    let classes = extract_class_dependencies(&content);
     
     let mut dependencies = Vec::new();
-    
-    // First extract addons array
-    if let Some(addons_start) = content.find("addons[] = {") {
-        let addons_end = content[addons_start..].find("};")
-            .map(|end| addons_start + end + 2)
-            .unwrap_or(content.len());
-        
-        let addons_str = &content[addons_start..addons_end];
-        let addons_list = addons_str.split('{').nth(1)
-            .and_then(|s| s.split('}').next())
-            .unwrap_or("");
-        
-        debug!("Found addons section: {}", addons_str);
-        
-        for addon in addons_list.split(',') {
-            let addon = addon.trim().trim_matches('"');
-            if !addon.is_empty() {
-                debug!("Found addon dependency: {}", addon);
-                dependencies.push(ClassReference {
-                    class_name: addon.to_string(),
-                    reference_type: ReferenceType::Direct,
-                    context: format!("sqm:addons[]:{}", file_path.display())
-                });
-            }
-        }
-    }
-    
-    // Then parse inventory classes
-    match parse_sqm_file(&content) {
-        Ok((_, inventory_classes)) => {
-            debug!("Successfully parsed {} inventory classes from SQM", inventory_classes.len());
-            for ic in &inventory_classes {
-                debug!("Found inventory class with parent: {}", ic.parent_class);
-                for ref_class in &ic.references {
-                    debug!("Found class reference: {}", ref_class.name);
-                }
-            }
-            dependencies.extend(inventory_classes.into_iter()
-                .flat_map(|ic| {
-                    let mut deps = Vec::new();
-                    deps.push(ClassReference {
-                        class_name: ic.parent_class,
-                        reference_type: ReferenceType::Inheritance,
-                        context: format!("sqm:class:{}", file_path.display())
-                    });
-                    deps.extend(ic.references.into_iter().map(|ref_class| ClassReference {
-                        class_name: ref_class.name,
-                        reference_type: ReferenceType::Direct,
-                        context: format!("sqm:inventory:{}", file_path.display())
-                    }));
-                    deps
-                }));
-        },
-        Err(e) => warn!("Failed to parse inventory classes in SQM file: {:?}", e),
-    }
-    
-    // Also get any additional class dependencies
-    let class_deps = extract_class_dependencies(&content);
-    debug!("Found {} additional class dependencies", class_deps.len());
-    for class_name in &class_deps {
-        debug!("Found additional class dependency: {}", class_name);
-    }
-    dependencies.extend(class_deps.into_iter()
-        .map(|class_name| ClassReference {
-            class_name,
+    for class in classes {
+        dependencies.push(ClassReference {
+            class_name: class,
             reference_type: ReferenceType::Direct,
-            context: format!("sqm:class:{}", file_path.display())
-        }));
-    
-    debug!("Total of {} dependencies found in SQM file", dependencies.len());
+            context: format!("sqm:{}", file_path.display())
+        });
+    }
     Ok(dependencies)
 }
 
