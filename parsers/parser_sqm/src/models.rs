@@ -1,175 +1,74 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
+use hemtt_sqm::{Class, Value};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Property {
-    pub name: String,
-    pub value: PropertyValue,
+/// Utility functions for working with HEMTT SQM classes
+pub(crate) trait ClassExt {
+    /// Find classes that match the given predicate
+    fn find_classes<F>(&self, predicate: F) -> Vec<&Class>
+    where
+        F: Fn(&Class) -> bool + Copy;
+
+    /// Extract property value as a string if it exists
+    fn get_property_string(&self, name: &str) -> Option<String>;
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum PropertyValue {
-    String(String),
-    Array(Vec<String>),
-    Number(f64),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Class {
-    pub name: String,
-    pub properties: HashMap<String, Property>,
-    pub nested_classes: Vec<Class>,
-}
-
-impl Class {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            properties: HashMap::new(),
-            nested_classes: Vec::new(),
-        }
-    }
-
-    pub fn find_classes<'a>(&'a self, predicate: &dyn Fn(&Class) -> bool) -> Vec<&'a Class> {
+impl ClassExt for Class {
+    fn find_classes<F>(&self, predicate: F) -> Vec<&Class>
+    where
+        F: Fn(&Class) -> bool + Copy,
+    {
         let mut results = Vec::new();
+        
+        // Add self if it matches
         if predicate(self) {
             results.push(self);
         }
-        for nested in &self.nested_classes {
-            results.extend(nested.find_classes(predicate));
-        }
-        results
-    }
-
-    pub fn find_properties<'a>(&'a self, predicate: &dyn Fn(&Property) -> bool) -> Vec<&'a Property> {
-        let mut results = Vec::new();
-        for property in self.properties.values() {
-            if predicate(property) {
-                results.push(property);
+        
+        // Search in nested classes
+        for (_, class_list) in &self.classes {
+            for class in class_list {
+                results.extend(class.find_classes(predicate));
             }
         }
-        for nested in &self.nested_classes {
-            results.extend(nested.find_properties(predicate));
-        }
+        
         results
+    }
+    
+    fn get_property_string(&self, name: &str) -> Option<String> {
+        self.properties.get(name).and_then(|value| {
+            match value {
+                Value::String(s) => Some(s.clone()),
+                _ => None,
+            }
+        })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
+/// Utility for collecting dependencies from SQM files
+pub(crate) struct DependencyCollector {
+    dependencies: HashSet<String>,
+}
 
-    #[test]
-    fn test_class_creation_and_modification() {
-        let mut class = Class::new("TestClass".to_string());
-        
-        // Test initial state
-        assert_eq!(class.name, "TestClass");
-        assert!(class.properties.is_empty());
-        assert!(class.nested_classes.is_empty());
-
-        // Add a property
-        let property = Property {
-            name: "test_prop".to_string(),
-            value: PropertyValue::String("value".to_string()),
-        };
-        class.properties.insert(property.name.clone(), property);
-        assert_eq!(class.properties.len(), 1);
-
-        // Add a nested class
-        let nested = Class::new("NestedClass".to_string());
-        class.nested_classes.push(nested);
-        assert_eq!(class.nested_classes.len(), 1);
-    }
-
-    #[test]
-    fn test_find_classes() {
-        let mut root = Class::new("Root".to_string());
-        let mut nested1 = Class::new("Target".to_string());
-        let nested2 = Class::new("Target".to_string());
-        let other = Class::new("Other".to_string());
-        
-        nested1.nested_classes.push(nested2);
-        root.nested_classes.push(nested1);
-        root.nested_classes.push(other);
-
-        let results = root.find_classes(&|class| class.name == "Target");
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|c| c.name == "Target"));
-    }
-
-    #[test]
-    fn test_find_properties() {
-        let mut root = Class::new("Root".to_string());
-        
-        // Add properties to root
-        let properties = vec![
-            ("name", PropertyValue::String("test".to_string())),
-            ("items", PropertyValue::Array(vec!["item1".to_string(), "item2".to_string()])),
-            ("count", PropertyValue::Number(5.0)),
-        ];
-
-        for (name, value) in properties {
-            root.properties.insert(name.to_string(), Property {
-                name: name.to_string(),
-                value,
-            });
+impl DependencyCollector {
+    pub fn new() -> Self {
+        Self {
+            dependencies: HashSet::new(),
         }
-
-        // Add nested class with properties
-        let mut nested = Class::new("Nested".to_string());
-        nested.properties.insert("name".to_string(), Property {
-            name: "name".to_string(),
-            value: PropertyValue::String("nested_value".to_string()),
-        });
-
-        root.nested_classes.push(nested);
-
-        // Find all properties named "name"
-        let results = root.find_properties(&|prop| prop.name == "name");
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|p| p.name == "name"));
-
-        // Find all string properties
-        let results = root.find_properties(&|prop| matches!(prop.value, PropertyValue::String(_)));
-        assert_eq!(results.len(), 2);
     }
-
-    #[test]
-    fn test_sqm_file_as_class() {
-        // Create an SQM file as a root class
-        let mut sqm = Class::new("Mission".to_string());
-        
-        // Add top-level properties
-        sqm.properties.insert("version".to_string(), Property {
-            name: "version".to_string(),
-            value: PropertyValue::Number(54.0),
-        });
-        
-        // Add nested classes
-        let mut config = Class::new("Config".to_string());
-        let mut inventory = Class::new("Inventory".to_string());
-        
-        inventory.properties.insert("weapon".to_string(), Property {
-            name: "weapon".to_string(),
-            value: PropertyValue::String("rifle".to_string()),
-        });
-        
-        config.nested_classes.push(inventory);
-        sqm.nested_classes.push(config);
-
-        // Test finding classes
-        let inventory_classes = sqm.find_classes(&|class| class.name == "Inventory");
-        assert_eq!(inventory_classes.len(), 1);
-        
-        // Test finding properties at root level
-        let version_props = sqm.find_properties(&|prop| prop.name == "version");
-        assert_eq!(version_props.len(), 1);
-        assert!(matches!(&version_props[0].value, PropertyValue::Number(54.0)));
-        
-        // Test finding nested properties
-        let weapon_props = sqm.find_properties(&|prop| prop.name == "weapon");
-        assert_eq!(weapon_props.len(), 1);
-        assert!(matches!(&weapon_props[0].value, PropertyValue::String(s) if s == "rifle"));
+    
+    /// Add a dependency string if it's valid
+    /// 
+    /// Dependencies are invalid if:
+    /// - They are empty strings
+    /// - They contain a colon (typically used for special commands)
+    pub fn add_dependency(&mut self, dependency: String) {
+        if !dependency.is_empty() && !dependency.contains(':') {
+            self.dependencies.insert(dependency);
+        }
     }
-} 
+    
+    /// Consume this collector and return the HashSet of dependencies
+    pub fn get_dependencies(self) -> HashSet<String> {
+        self.dependencies
+    }
+}
