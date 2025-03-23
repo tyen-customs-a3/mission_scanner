@@ -1,11 +1,8 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, info, warn};
 use rayon::prelude::*;
-use tokio::sync::Mutex;
 
 use crate::types::{MissionScannerConfig, MissionResults};
 use super::{collector, parser};
@@ -57,15 +54,6 @@ pub async fn scan_mission(
         sqf_files.len(),
         cpp_files.len());
     
-    // Set up progress bars
-    let multi_progress = Arc::new(Mutex::new(MultiProgress::new()));
-    let scan_progress = multi_progress.lock().await.add(ProgressBar::new(1));
-    scan_progress.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-        .unwrap()
-        .progress_chars("#>-"));
-    scan_progress.set_message("Scanning mission files");
-    
     let mut dependencies = Vec::new();
     
     // Process mission.sqm if present
@@ -110,10 +98,6 @@ pub async fn scan_mission(
     for class in &unique_classes {
         debug!("  - {}", class);
     }
-    
-    // Update progress
-    scan_progress.inc(1);
-    scan_progress.finish_with_message("Mission scan complete");
     
     Ok(MissionResults {
         mission_name,

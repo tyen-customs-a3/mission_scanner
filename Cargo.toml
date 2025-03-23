@@ -29,7 +29,6 @@ parser_sqm = { path = "parsers/parser_sqm" }
 parser_hpp = { path = "parsers/parser_hpp" }
 anyhow = "1.0.97"
 env_logger = "0.11.7"
-indicatif = { version = "0.17.11", features = ["rayon"] }
 log = "0.4.26"
 num_cpus = "1.16.0"
 rayon = "1.10.0"
@@ -56,3 +55,7 @@ harness = true
 [[example]]
 name = "basic"
 path = "examples/basic.rs"
+
+[[bench]]
+name = "mission_scanner_benchmarks"
+harness = false
