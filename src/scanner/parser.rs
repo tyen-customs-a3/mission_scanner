@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use log::{debug, warn};
 use parser_hpp::{parse_file as parser_hpp_file, HppValue};
-use parser_sqf::{parse_file as parse_sqf_file, ItemKind};
+use parser_sqf::parse_file as parse_sqf_file;
 use parser_sqm::extract_class_dependencies;
 
 // Internal crate imports
@@ -153,27 +153,32 @@ pub fn parse_sqf(file_path: &Path) -> Result<Vec<ClassReference>> {
     debug!("Starting SQF file parse: {}", file_path.display());
     
     // Use the parser_sqf crate's API
-    let items = parse_sqf_file(file_path,)
+    let items = parse_sqf_file(file_path)
         .map_err(|e| anyhow!("Failed to parse SQF file: {:?}", e))?;
     
     debug!("Found {} items in SQF file", items.len());
     for item in &items {
-        debug!("Found SQF item: {} ({:?})", item.class_name, item.kind);
+        debug!("Found SQF item: {} ({})", item.class_name, item.context);
     }
     
     // Convert to our format
     let dependencies: Vec<ClassReference> = items.into_iter()
-        .map(|item| ClassReference {
-            class_name: item.class_name,
-            reference_type: match item.kind {
-                ItemKind::Weapon => ReferenceType::Direct,
-                ItemKind::Magazine => ReferenceType::Direct,
-                ItemKind::Uniform => ReferenceType::Direct,
-                ItemKind::Vest => ReferenceType::Direct,
-                ItemKind::Backpack => ReferenceType::Direct,
-                ItemKind::Item => ReferenceType::Variable,
-            },
-            context: format!("sqf:{}:{:?}", file_path.display(), item.kind)
+        .map(|item| {
+            let reference_type = if item.context.contains("addWeapon") || 
+                                 item.context.contains("addMagazine") || 
+                                 item.context.contains("addUniform") || 
+                                 item.context.contains("addVest") || 
+                                 item.context.contains("addBackpack") {
+                ReferenceType::Direct
+            } else {
+                ReferenceType::Variable
+            };
+            
+            ClassReference {
+                class_name: item.class_name,
+                reference_type,
+                context: item.context // Don't add the sqf: prefix anymore
+            }
         })
         .collect();
     
