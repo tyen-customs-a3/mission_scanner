@@ -8,7 +8,9 @@ use serde::{Serialize, Deserialize};
 use tempfile::NamedTempFile;
 
 mod parser;
+mod query;
 pub use parser::*;
+pub use query::DependencyExtractor;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HppClass {
