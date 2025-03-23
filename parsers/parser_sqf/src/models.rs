@@ -1,47 +1,41 @@
 //! Core data structures for SQF parsing and analysis
 
-use hemtt_sqf::Expression;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ItemKind {
-    Weapon,
-    Magazine,
-    Backpack,
-    Vest,
-    Uniform,
-    Item,
+/// Represents a class reference found in SQF code
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ClassReference {
+    /// The class name/ID
+    pub class_name: String,
+    /// The context where it was found (scope/conditions)
+    pub context: String,
 }
 
-impl fmt::Display for ItemKind {
+/// Represents how a class reference was discovered
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum UsageContext {
+    /// Used in an add* command (addWeapon, addVest, etc.)
+    AddCommand(String),
+    /// Used in a function known to use class references
+    KnownFunction(String),
+    /// Directly used as a string in a context that suggests it's a class
+    DirectReference,
+}
+
+impl fmt::Display for UsageContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ItemKind::Weapon => write!(f, "weapon"),
-            ItemKind::Magazine => write!(f, "magazine"),
-            ItemKind::Backpack => write!(f, "backpack"),
-            ItemKind::Vest => write!(f, "vest"),
-            ItemKind::Uniform => write!(f, "uniform"),
-            ItemKind::Item => write!(f, "item"),
+            UsageContext::AddCommand(cmd) => write!(f, "Used in command: {}", cmd),
+            UsageContext::KnownFunction(func) => write!(f, "Used in function: {}", func),
+            UsageContext::DirectReference => write!(f, "Direct reference"),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ItemReference {
-    pub item_id: String,
-    pub kind: ItemKind,
-}
-
-#[derive(Debug, Clone)]
-pub struct ItemContext {
-    pub item: ItemReference,
-    pub conditions: Vec<Expression>,
-    pub scope: String,
-}
-
+/// Represents the result of analyzing SQF code
 #[derive(Debug, Clone)]
 pub struct AnalysisResult {
-    pub items: Vec<ItemContext>,
+    pub references: Vec<ClassReference>,
 }
 
 #[cfg(test)]
@@ -49,33 +43,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_item_kind_equality() {
-        assert_eq!(ItemKind::Weapon, ItemKind::Weapon);
-        assert_ne!(ItemKind::Weapon, ItemKind::Magazine);
+    fn test_class_reference_equality() {
+        let ref1 = ClassReference {
+            class_name: "test_item".to_string(),
+            context: "test_scope".to_string(),
+        };
+        
+        let ref2 = ClassReference {
+            class_name: "test_item".to_string(),
+            context: "test_scope".to_string(),
+        };
+        
+        let ref3 = ClassReference {
+            class_name: "different_item".to_string(),
+            context: "test_scope".to_string(),
+        };
+        
+        assert_eq!(ref1, ref2);
+        assert_ne!(ref1, ref3);
     }
 
     #[test]
-    fn test_item_reference_creation() {
-        let item = ItemReference {
-            item_id: "test_item".to_string(),
-            kind: ItemKind::Item,
-        };
-        assert_eq!(item.item_id, "test_item");
-        assert_eq!(item.kind, ItemKind::Item);
+    fn test_usage_context_display() {
+        assert_eq!(
+            UsageContext::AddCommand("addWeapon".to_string()).to_string(),
+            "Used in command: addWeapon"
+        );
+        assert_eq!(
+            UsageContext::KnownFunction("ace_arsenal_fnc_initBox".to_string()).to_string(),
+            "Used in function: ace_arsenal_fnc_initBox"
+        );
+        assert_eq!(
+            UsageContext::DirectReference.to_string(),
+            "Direct reference"
+        );
     }
-
-    #[test]
-    fn test_item_context_creation() {
-        let item = ItemReference {
-            item_id: "test_item".to_string(),
-            kind: ItemKind::Item,
-        };
-        let context = ItemContext {
-            item,
-            conditions: vec![],
-            scope: "test_scope".to_string(),
-        };
-        assert_eq!(context.scope, "test_scope");
-        assert!(context.conditions.is_empty());
-    }
-} 
+}

@@ -16,9 +16,14 @@ log = "0.4.26"
 [dev-dependencies]
 env_logger = "0.11.7"
 tempfile = "3.10.1"
+criterion = { version = "0.5", features = ["html_reports"] }
 
-[lints.rust]
-dead_code = "allow"
-unused_variables = "allow"
-unused_imports = "allow"
-unused_assignments = "allow"
+[[bench]]
+name = "sqf_parser_benchmarks"
+harness = false
+
+# [lints.rust]
+# dead_code = "allow"
+# unused_variables = "allow"
+# unused_imports = "allow"
+# unused_assignments = "allow"

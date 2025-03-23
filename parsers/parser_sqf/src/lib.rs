@@ -1,32 +1,25 @@
 //! SQF Parser for scanning mission files
 //! 
-//! This module provides functionality to parse SQF files and extract item references
-//! from various commands like addBackpack, addWeapon, etc.
+//! This module provides functionality to parse SQF files and extract class references
+//! from mission scripts based on how they are used in functions.
 
 // Declare modules
 mod models;
-mod analyzer;
+mod evaluator;
+mod array_handler;
 
 use std::path::Path;
-use std::path::PathBuf;
 use std::fs;
 use std::sync::Arc;
 use std::collections::HashMap;
-use std::fmt;
 use std::io;
-
-use hemtt_sqf::{Statements, StringWrapper, Expression, BinaryCommand};
 use hemtt_sqf::parser::{run as parse_sqf, database::Database, ParserError};
-use hemtt_sqf::parser::lexer::{strip_comments, strip_noop};
-use hemtt_workspace::{reporting::{Processed, Code, Definition, Output, Token, Symbol}, position::{Position, LineCol}, WorkspacePath, Workspace, LayerType, Error as WorkspaceError};
-use hemtt_common::config::PDriveOption;
 use hemtt_sqf::Error as SqfError;
-use hemtt_preprocessor::Processor;
-use crate::analyzer::Analyzer;
-use crate::models::{ItemReference, ItemContext};
 
-// Re-export public types
-pub use models::ItemKind;
+use hemtt_workspace::{reporting::{Processed, Output, Token, Symbol}, position::{Position, LineCol}, WorkspacePath, Error as WorkspaceError};
+
+// Export our public types
+pub use models::{ClassReference, UsageContext};
 
 #[derive(Debug)]
 pub enum Error {
@@ -55,36 +48,23 @@ impl From<SqfError> for Error {
     }
 }
 
-/// Represents a reference to an item found in SQF code
-#[derive(Debug, Clone)]
-pub struct ItemFound {
-    /// The item's class name/ID
-    pub class_name: String,
-    /// The type of item (weapon, magazine, etc)
-    pub kind: ItemKind,
-    /// The context where this item was found (scope/conditions)
-    pub context: String,
-}
-
-/// Check if an array represents a diary entry
-fn is_diary_array(elements: &[Expression]) -> bool {
-    // Check if this is a diary entry array: ["diary", ["Title", "Content"]]
-    if elements.len() == 2 {
-        if let Expression::String(first, _, _) = &elements[0] {
-            return first.to_string() == "diary";
-        }
-    }
-    false
-}
-
-/// Parse an SQF file and extract all item references.
+/// Parse an SQF file and extract all class references by analyzing function usage.
 ///
 /// # Arguments
 /// * `file_path` - Path to the SQF file to parse
 ///
 /// # Returns
-/// * `Result<Vec<ItemFound>, Error>` - List of found items or error
-pub fn parse_file(file_path: &Path) -> Result<Vec<ItemFound>, Error> {
+/// * `Result<Vec<ClassReference>, Error>` - List of found class references or error
+pub fn parse_file(file_path: &Path) -> Result<Vec<ClassReference>, Error> {
+    // First do a quick scan with buffered reading
+    let file = fs::File::open(file_path)?;
+    let reader = std::io::BufReader::new(file);
+    
+    if !evaluator::Evaluator::should_evaluate(reader) {
+        return Ok(Vec::new());
+    }
+    
+    // If we found a match, now read the whole file for full parsing
     let content = fs::read_to_string(file_path)?;
     
     // Create a workspace path for the file
@@ -112,24 +92,11 @@ pub fn parse_file(file_path: &Path) -> Result<Vec<ItemFound>, Error> {
     let statements = parse_sqf(&database, &processed)
         .map_err(Error::ParserError)?;
 
-    let result = analyzer::analyze_sqf(&statements)
-        .map_err(|e| Error::UnparseableSyntax(e))?;
-    
-    // Convert internal types to public API types and filter out diary entries
-    let items = result.items.into_iter()
-        .filter(|item| {
-            // Filter out diary entries based on the context
-            !item.scope.contains("diary") && !item.scope.contains("createDiaryRecord")
-        })
-        .map(|item| ItemFound {
-            class_name: item.item.item_id,
-            kind: item.item.kind,
-            context: item.scope,
-        })
-        .collect();
-    
-    Ok(items)
+    // Use the evaluator to extract class references
+    evaluator::evaluate_sqf(&statements)
+        .map_err(|e| Error::UnparseableSyntax(e))
+        .map(|result| result.references)
 }
 
-// Re-export analyzer for convenience
-pub use analyzer::analyze_sqf;
+// Re-export evaluator for convenience
+pub use evaluator::evaluate_sqf;
