@@ -92,6 +92,8 @@ pub struct ClassReference {
     pub reference_type: ReferenceType,
     /// Context where the class is referenced
     pub context: String,
+    /// Source file
+    pub source_file: PathBuf,
 }
 
 /// Type of reference to a class

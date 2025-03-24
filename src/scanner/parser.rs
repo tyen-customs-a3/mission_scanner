@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use log::{debug, warn};
 use parser_hpp::{parse_file as parser_hpp_file, HppValue};
-use parser_sqf::parse_file as parse_sqf_file;
+use sqf_analyzer::{Args, analyze_sqf};
 use parser_sqm::extract_class_dependencies;
 
 // Internal crate imports
@@ -83,30 +83,53 @@ pub fn parse_hpp(file_path: &Path) -> Result<Vec<ClassReference>> {
             dependencies.push(ClassReference {
                 class_name: parent,
                 reference_type: ReferenceType::Inheritance,
-                context: format!("loadout:class:{}", file_path.display())
+                context: format!("loadout:class:{}", file_path.display()),
+                source_file: file_path.to_path_buf()
             });
         }
         
-        // Add items only from named arrays we care about
+        // Add both array properties and string properties
         for property in class.properties {
-            if let HppValue::Array(items) = property.value {
-                // Only process named array properties that typically contain equipment
-                let property_name = property.name.to_lowercase();
-                if is_equipment_array(&property_name) {
-                    debug!("Processing equipment array: {}", property_name);
-                    // Process each array item, stripping any extra quotes
-                    for item in items {
-                        // Skip empty items
-                        let clean_item = item.trim().trim_matches('"');
-                        if !clean_item.is_empty() {
+            match &property.value {
+                HppValue::Array(items) => {
+                    // Process array properties (uniform[], vest[], etc.)
+                    let property_name = property.name.to_lowercase();
+                    if is_equipment_array(&property_name) {
+                        debug!("Processing equipment array: {}", property_name);
+                        
+                        // Process each array item, stripping any extra quotes
+                        for item in items {
+                            // Skip empty items and preprocessor macros
+                            let clean_item = item.trim().trim_matches('"');
+                            if !clean_item.is_empty() && 
+                               clean_item != "default" && 
+                               !clean_item.starts_with("LIST_") {
+                                dependencies.push(ClassReference {
+                                    class_name: clean_item.to_string(),
+                                    reference_type: ReferenceType::Direct,
+                                    context: format!("loadout:{}:{}", property_name, file_path.display()),
+                                    source_file: file_path.to_path_buf()
+                                });
+                            }
+                        }
+                    }
+                },
+                HppValue::String(value) => {
+                    // Process string properties (uniform=, vest=, etc.)
+                    let property_name = property.name.to_lowercase();
+                    if is_equipment_property(&property_name) {
+                        let clean_item = value.trim().trim_matches('"');
+                        if !clean_item.is_empty() && clean_item != "default" {
                             dependencies.push(ClassReference {
                                 class_name: clean_item.to_string(),
                                 reference_type: ReferenceType::Direct,
-                                context: format!("loadout:{}:{}", property_name, file_path.display())
+                                context: format!("loadout:{}:{}", property_name, file_path.display()),
+                                source_file: file_path.to_path_buf()
                             });
                         }
                     }
-                }
+                },
+                _ => {}
             }
         }
     }
@@ -128,6 +151,19 @@ fn is_equipment_array(name: &str) -> bool {
     EQUIPMENT_ARRAYS.iter().any(|&array_name| name == array_name)
 }
 
+/// Determine if a property name is an equipment property we should process
+fn is_equipment_property(name: &str) -> bool {
+    // List of known equipment property names in loadout files
+    const EQUIPMENT_PROPERTIES: [&str; 17] = [
+        "uniform", "vest", "backpack", "headgear", "goggles", "hmd",
+        "primaryweapon", "secondaryweapon", "handgunweapon", "sidearmweapon",
+        "scope", "bipod", "attachment", "silencer", "magazines", "items", "linkeditems",
+        // Add any other relevant equipment property names here
+    ];
+    
+    EQUIPMENT_PROPERTIES.iter().any(|&prop_name| name == prop_name)
+}
+
 /// Parse a SQM file and extract class references
 pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassReference>> {
     debug!("Starting SQM file parse: {}", file_path.display());
@@ -142,42 +178,42 @@ pub fn parse_sqm(file_path: &Path) -> Result<Vec<ClassReference>> {
         dependencies.push(ClassReference {
             class_name: class,
             reference_type: ReferenceType::Direct,
-            context: format!("sqm:{}", file_path.display())
+            context: format!("sqm:{}", file_path.display()),
+            source_file: file_path.to_path_buf()
         });
     }
     Ok(dependencies)
 }
 
-/// Wrapper around the SQF parser that converts its output to our format
+/// Wrapper around the sqf-analyzer crate that converts its output to our format
 pub fn parse_sqf(file_path: &Path) -> Result<Vec<ClassReference>> {
-    debug!("Starting SQF file parse: {}", file_path.display());
+    debug!("Starting SQF file parse using sqf-analyzer: {}", file_path.display());
     
-    // Use the parser_sqf crate's API
-    let items = parse_sqf_file(file_path)
-        .map_err(|e| anyhow!("Failed to parse SQF file: {:?}", e))?;
+    // First, run with equipment functions to get direct equipment references
+    let equipment_args = Args {
+        path: file_path.to_path_buf(),
+        output: "text".to_string(),
+        full_paths: false,
+        include_vars: false,
+        equipment_only: false,
+        functions: Some("addItemToUniform,addItemToVest,addItemToBackpack,addItem,addWeapon,addWeaponItem,addMagazine,addMagazineCargo,addWeaponCargo,addItemCargo,forceAddUniform,addVest,addHeadgear,addGoggles,addBackpack,ace_arsenal_fnc_initBox".to_string()),
+    };
+    
+    // Use the sqf-analyzer crate to analyze the file for equipment
+    let mut items = analyze_sqf(&equipment_args)
+        .map_err(|e| anyhow!("Failed to parse SQF file with sqf-analyzer (equipment mode): {:?}", e))?;
     
     debug!("Found {} items in SQF file", items.len());
-    for item in &items {
-        debug!("Found SQF item: {} ({})", item.class_name, item.context);
-    }
     
-    // Convert to our format
+    // Convert HashSet<String> to Vec<ClassReference>
     let dependencies: Vec<ClassReference> = items.into_iter()
         .map(|item| {
-            let reference_type = if item.context.contains("addWeapon") || 
-                                 item.context.contains("addMagazine") || 
-                                 item.context.contains("addUniform") || 
-                                 item.context.contains("addVest") || 
-                                 item.context.contains("addBackpack") {
-                ReferenceType::Direct
-            } else {
-                ReferenceType::Variable
-            };
-            
+            let reference_type = ReferenceType::Direct;
             ClassReference {
-                class_name: item.class_name,
+                class_name: item,
                 reference_type,
-                context: item.context // Don't add the sqf: prefix anymore
+                context: format!("sqf:equipment:{}", file_path.display()),
+                source_file: file_path.to_path_buf()
             }
         })
         .collect();
