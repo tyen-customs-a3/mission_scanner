@@ -13,6 +13,7 @@ hemtt-preprocessor = { path = "../HEMTT/libs/preprocessor" }
 hemtt-common = { path = "../HEMTT/libs/common" }
 hemtt-config = { path = "../HEMTT/libs/config" }
 hemtt-sqm = { path = "../HEMTT/libs/sqm" }
+sqf-analyzer = { path = "../sqf-analyzer" }
 # hemtt-sqf = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
 # hemtt-workspace = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
 # hemtt-preprocessor = { git = "https://github.com/tyen-customs-a3/HEMTT.git", rev = "b74d694" }
@@ -28,6 +29,7 @@ edition = "2024"
 parser_sqf = { path = "parsers/parser_sqf" }
 parser_sqm = { path = "parsers/parser_sqm" }
 parser_hpp = { path = "parsers/parser_hpp" }
+sqf-analyzer = { path = "../sqf-analyzer" }
 anyhow = "1.0.97"
 env_logger = "0.11.7"
 log = "0.4.26"
